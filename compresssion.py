@@ -181,6 +181,7 @@ def plot_iterations(iterations, target=None):
 # Parameters
 
 directions = [1, -1]
+directionsy = [1, -1]
 angles = [0, 90, 180, 270]
 candidates = [[direction, angle] for direction in directions for angle in angles]
 
@@ -194,8 +195,8 @@ def test_greyscale():
     img = reduce(img, 4)
     plt.figure()
     plt.imshow(img, cmap='gray', interpolation='none')
-    transformations = compress(img, 16, 8, 16)
-    iterations = decompress(transformations, 16, 8, 16, new_size=512)
+    transformations = compress(img, 8, 4, 8)
+    iterations = decompress(transformations, 8, 4, 8, new_size=512, nb_iter=12)
     # mpimg.imsave('lena1028.bmp', iterations[-1], cmap='gray')
     # iterations512 = decompress(transformations, 16, 8, 16, new_size=512)
     # mpimg.imsave('lena512compressed.bmp', iterations512[-1], cmap='gray')
