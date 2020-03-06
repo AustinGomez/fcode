@@ -3,22 +3,22 @@ import skvideo.io
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 import cv2
-import blockcompression
+import nosearchblock
 import numpy as np
 import pickle
 import compresssion
 
-video = cv2.VideoCapture("chungus128.mp4")
+video = cv2.VideoCapture("chungus512.mp4")
 frame_count = 0
 ret, frame = video.read()
 grayFrame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 transformations = []
 
-max_frames = 30
+max_frames = 33
 frame_block_length = 10
+frames = []
 while video.isOpened():
-    frame_block = []
-    for i in range(frame_block_length):
+    for i in range(max_frames):
         ret, frame = video.read()
         frame_count += 1
         if np.shape(frame) == () or frame_count >= max_frames:
@@ -26,26 +26,25 @@ while video.isOpened():
             video.release()
             break
         grayFrame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        frame_block.append(grayFrame[:128, :128])
+        frames.append(grayFrame[:512, :512])
 
 
-    transformations.append(blockcompression.compress_block(frame_block, 8))
-
+transformations = nosearchblock.octtree_compress(frames, 16, error_threshold=5, min_range_size=4)
 pickle.dump(transformations, open("transformations2.pkl", "wb"))
 
-output_resolution = 128
+output_resolution = 512
 if not transformations:
     transformations = pickle.load(open("transformations2.pkl", "rb"))
-decompressedVideo = blockcompression.decompress(transformations, output_resolution, output_resolution, 66, 10, 8)
+decompressed_video = nosearchblock.octtree_decompress(transformations, output_resolution, num_frames=frame_count, number_iterations=9, factor=1)
 
 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-out = cv2.VideoWriter('chungus128c.mp4', fourcc, 24, (output_resolution, output_resolution), isColor=False)
-print(np.shape(decompressedVideo))
-for frame_block in decompressedVideo:
-    for frame in frame_block:
+out = cv2.VideoWriter('chungus512c.mp4', fourcc, 24, (output_resolution, output_resolution), isColor=False)
+print(np.shape(decompressed_video))
+for frame in decompressed_video:
         out.write(frame.astype(np.uint8))
 
 
+video.release()
 cv2.destroyAllWindows()
 
 # img = compresssion.reduce(mpimg.imread('lena512.bmp'), 4)

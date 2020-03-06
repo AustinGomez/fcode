@@ -61,7 +61,7 @@ def distance(range_block, domain_block, error_threshold=0):
     D = domain_block - domain_block_average
     R = range_block - range_block_average
     for a in range(32):
-        error = np.linalg.norm(a * D - R) ** 2
+        error = (np.linalg.norm(a * D - R) ** 2) ** 0.5
         if error < min_error:
             min_error = error
             best_a = a
@@ -89,6 +89,16 @@ def find_domain_start(range_block, img_width, img_height):
 
     return domain_startx, domain_starty, domain_endx, domain_endy
 
+def find_domain_start_no_block(start_x, start_y, range_block_size, img_width, img_height):
+    domain_size = range_block_size * 2
+    domain_startx = max(start_x - domain_size // 2, 0)
+    domain_starty = max(start_y - domain_size // 2, 0)
+
+    domain_endx = domain_startx + domain_size
+    domain_endy = domain_starty + domain_size
+
+    return domain_startx, domain_starty, domain_endx, domain_endy
+
 def quadtree_compress(img, range_size, error_threshold=0, min_range_size=2):
     transformations = []
     img = np.array(img)
@@ -110,8 +120,12 @@ def quadtree_compress(img, range_size, error_threshold=0, min_range_size=2):
         domain_block = img[domain_starty:domain_endy, domain_startx:domain_endx]
         reduced_domain_block = reduce(domain_block)
         # a, r = fit_contrast_and_brightness(range_block_img, reduced_domain_block)
-        error, a, r = distance(range_block_img, reduced_domain_block, error_threshold * 2 ** (range_size/range_block.size))
-        if error < error_threshold * (2*(range_size/range_block.size)) or range_block.size == min_range_size:
+        level = range_size // range_block.size
+
+        # Closed form of recurrence relation T_n = T_(n-1) + 1
+        new_error_threshold = 2 ** level * error_threshold + (2 ** level - 1)
+        error, a, r = distance(range_block_img, reduced_domain_block, new_error_threshold)
+        if error < new_error_threshold or range_block.size == min_range_size:
             del uncovered_range_blocks[0]
             transformations.append((range_block.start_x, range_block.start_y, range_block.size, a, r))
         else:
@@ -130,19 +144,18 @@ def quadtree_compress(img, range_size, error_threshold=0, min_range_size=2):
     return transformations
 
 
-def quadtree_decompress(transformations, range_size, output_size, number_iterations=12, factor=1):
+def quadtree_decompress(transformations, range_size, output_size, number_iterations=9, factor=1):
     iterations = [np.random.randint(0, output_size, (output_size, output_size))]
     cur_img = np.zeros((output_size, output_size))
     print(len(transformations))
     for iteration in range(number_iterations):
         print(iteration)
         for start_x, start_y, range_block_size, a, r in transformations:
-            range_block = RangeBlock(range_block_size*factor, start_x*factor, start_y*factor, a, r)
-            domain_startx, domain_starty, domain_endx, domain_endy = find_domain_start(range_block, output_size, output_size)
+            domain_startx, domain_starty, domain_endx, domain_endy = find_domain_start_no_block(start_x*factor, start_y*factor, range_block_size*factor, output_size, output_size)
             S = reduce(iterations[-1][domain_starty:domain_endy, domain_startx:domain_endx])
             D = S * a + r
-            cur_img[range_block.start_x:range_block.start_x + range_block_size*factor,
-            range_block.start_y:range_block.start_y + range_block_size*factor] = D
+            cur_img[start_x * factor:(start_x + range_block_size) * factor,
+            start_y * factor:(start_y + range_block_size) * factor] = D
         iterations.append(cur_img)
         cur_img = np.zeros((output_size, output_size))
     return iterations
@@ -150,21 +163,21 @@ def quadtree_decompress(transformations, range_size, output_size, number_iterati
 
 # Tests
 def test_greyscale():
-    img = reduce(mpimg.imread('lena512.bmp'))
+    img = mpimg.imread('lena512.bmp')
     transformations = []
     img = get_greyscale_image(img)
     plt.figure()
     # plt.imshow(img, cmap='gray', interpolation='none')
-    # transformations = quadtree_compress(img, 32, 10, 2)
-    # pickle.dump(transformations, open("transformationsNoSearch.pkl", "wb"))
+    transformations = quadtree_compress(img, 32, 2, 2)
+    pickle.dump(transformations, open("transformationsNoSearch.pkl", "wb"))
     if not transformations:
         transformations = pickle.load(open("transformationsNoSearch.pkl", "rb"))
-    iterations = quadtree_decompress(transformations, 4, 1028, 12, factor=2)
+    iterations = quadtree_decompress(transformations, 4, 512, 9, factor=1)
     # mpimg.imsave('lena1028.bmp', iterations[-1], cmap='gray')
     # iterations512 = decompress(transformations, 16, 8, 16, new_size=512)
-    mpimg.imsave('lena256compressed.bmp', iterations[-1],  vmin=0, vmax=255, cmap='gray')
+    mpimg.imsave('lena512compressed.bmp', iterations[-1],  vmin=0, vmax=255, cmap='gray')
     plt.imshow(iterations[-1],  vmin=0, vmax=255, cmap='gray')
-    plot_iterations(iterations, img)
+    # plot_iterations(iterations, img)
     plt.show()
 
 # Instead i should decompress with transformations[i][j]
