@@ -1,16 +1,13 @@
 import pickle
 from collections import deque
-
+from skimage import color, io
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 from scipy import ndimage
 import numpy as np
 import math
-
+from cv2 import imread
 # Transformations
-
-def reduce(img):
-    return ndimage.zoom(img, (0.5, 0.5))
 
 
 def find_contrast_and_brightness2(D, S):
@@ -21,6 +18,7 @@ def find_contrast_and_brightness2(D, S):
     # x = optimize.lsq_linear(A, b, [(-np.inf, -2.0), (np.inf, 2.0)]).x
     print(x[1], x[0])
     return x[1], x[0]
+
 
 def distance(range_block, domain_block, error_threshold=0):
     #a, b = find_contrast_and_brightness2(range_block, domain_block)
@@ -38,7 +36,7 @@ def distance(range_block, domain_block, error_threshold=0):
     r21 = range_block[:, :range_block_size // 2]
     R21 = r21 - np.average(r21)
 
-    for a in range(-6, 7):
+    for a in range(-10, 11):
         a = a * 0.1
         error = np.linalg.norm(a * D21 - R21) ** 2
         if error > error_threshold and error >= min_error:
@@ -63,7 +61,8 @@ class RangeBlock:
         self.r = r
 
 
-def find_domain_start(range_block, img_width, img_height):
+def find_domain_start(range_block):
+    # return range_block.start_x // 2, range_block.start_y // 2, range_block.start_x // 2 + range_block.size, range_block.start_y // 2 + range_block.size
     domain_size = range_block.size * 2
     domain_startx = max(range_block.start_x - domain_size // 2, 0)
     domain_starty = max(range_block.start_y - domain_size // 2, 0)
@@ -78,12 +77,17 @@ def find_domain_start_no_block(start_x, start_y, range_block_size, img_width, im
     domain_size = range_block_size * 2
     domain_startx = max(start_x - domain_size // 2, 0)
     domain_starty = max(start_y - domain_size // 2, 0)
-
     domain_endx = domain_startx + domain_size
     domain_endy = domain_starty + domain_size
-
     return domain_startx, domain_starty, domain_endx, domain_endy
 
+
+def preprocess(img):
+    result = np.zeros((img.shape[0], img.shape[1]))
+    for i in range(result.shape[0]):
+        for j in range(result.shape[1]):
+            result[i, j] = np.mean(img[i:i + 1, j:(j + 1)])
+    return result
 
 def quadtree_compress(img, range_size, error_threshold=0, min_range_size=2):
     transformations = []
@@ -94,6 +98,7 @@ def quadtree_compress(img, range_size, error_threshold=0, min_range_size=2):
                     for i in range(0, height, range_size)
                     for j in range(0, width, range_size)]
     uncovered_range_blocks = deque(range_blocks)
+    reduced_img = preprocess(img)
     while len(uncovered_range_blocks):
         range_block = uncovered_range_blocks.popleft()
         range_block_img = img[
@@ -101,14 +106,12 @@ def quadtree_compress(img, range_size, error_threshold=0, min_range_size=2):
                           range_block.start_x:range_block.start_x + range_block.size
                           ]
 
-        domain_startx, domain_starty, domain_endx, domain_endy = find_domain_start(range_block, width, height)
-
-        domain_block = img[domain_starty:domain_endy, domain_startx:domain_endx]
-        reduced_domain_block = reduce(domain_block)
+        domain_startx, domain_starty, domain_endx, domain_endy = find_domain_start(range_block)
+        domain_block = reduced_img[domain_starty:domain_endy:2, domain_startx:domain_endx:2]
         # a, r = fit_contrast_and_brightness(range_block_img, reduced_domain_block)
         level = int(math.log(range_size / range_block.size, 2))
-        new_error_threshold = error_threshold ** (2 ** level)  + (2 ** level) - 1
-        error, a, r = distance(range_block_img, reduced_domain_block, new_error_threshold)
+        new_error_threshold = (2 ** level) * error_threshold + (2 ** level) - 1
+        error, a, r = distance(range_block_img, domain_block, new_error_threshold)
         if error < new_error_threshold or range_block.size == min_range_size:
             # if level in (1, 2):
             #     print ("FOUND", level, error, a)
@@ -134,9 +137,11 @@ def quadtree_decompress(transformations, range_size, output_size, number_iterati
     print(len(transformations))
     for iteration in range(number_iterations):
         print(iteration)
+        reduced_iteration = preprocess(iterations[-1])
         for start_x, start_y, range_block_size, a, r in transformations:
             domain_startx, domain_starty, domain_endx, domain_endy = find_domain_start_no_block(start_x*factor, start_y*factor, range_block_size*factor, output_size, output_size)
-            S = reduce(iterations[-1][domain_starty:domain_endy, domain_startx:domain_endx])
+            S = reduced_iteration[domain_starty:domain_endy:2, domain_startx:domain_endx:2]
+
             domain_average = np.average(S)
             D = (S - domain_average) * a + r
             cur_img[
@@ -150,26 +155,27 @@ def quadtree_decompress(transformations, range_size, output_size, number_iterati
 
 # Tests
 def test_greyscale():
-    img = mpimg.imread('lena512.bmp')
+    filename = "lena512.bmp"
+    img = imread(filename, 0)
+    plt.imshow(img, cmap="gray")
     #img = mpimg.imread('lena512.bmp')[:128,:128]
     transformations = []
     plt.figure()
     # plt.imshow(img, cmap='gray', interpolation='none')
-    transformations = quadtree_compress(img, 16, 4, 2)
-    pickle.dump(transformations, open("transformationsNoSearch.pkl", "wb"))
+    # transformations = quadtree_compress(img, 16, 50, 2)
+    # pickle.dump(transformations, open("transformationsNoSearch.pkl", "wb"))
     if not transformations:
         transformations = pickle.load(open("transformationsNoSearch.pkl", "rb"))
     iterations = quadtree_decompress(transformations, 4, 512, 8, factor=1)
     # mpimg.imsave('lena1028.bmp', iterations[-1], cmap='gray')
     # iterations512 = decompress(transformations, 16, 8, 16, new_size=512)
-    mpimg.imsave('lena512upscaledcompressed.bmp', iterations[-1],  vmin=0, vmax=255, cmap='gray')
+    mpimg.imsave('lena512compressed.bmp', iterations[-1],  vmin=0, vmax=255, cmap='gray')
     # plt.imshow(iterations[-1],  vmin=0, vmax=255, cmap='gray')
     plot_iterations(iterations, img)
     plt.show()
 
 
 # Plot
-
 def plot_iterations(iterations, target=None):
     # Configure plot
     plt.figure()
