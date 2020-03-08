@@ -5,6 +5,7 @@ from scipy import ndimage, signal
 import numpy as np
 import math
 from collections import deque
+from skimage.metrics import structural_similarity as ssim
 
 class RangeBlock:
     def __init__(self, size, start_frame, start_x, start_y):
@@ -15,24 +16,39 @@ class RangeBlock:
 
 
 def reduce(frames, factor=2):
-    return ndimage.zoom(frames, 1/factor, order=0)
+    return ndimage.zoom(frames, 1/factor, order=0, prefilter=False)
 
 
 def distance(range_block, domain_block, error_threshold=0):
+    #a, b = find_contrast_and_brightness2(range_block, domain_block)
+    #error = np.linalg.norm(a * D - R) ** 2
+    #return error, a, b
+    min_error = float('inf')
     domain_block_average = np.average(domain_block)
     range_block_average = np.average(range_block)
-    min_error = float('inf')
-    best_a = 0
     D = domain_block - domain_block_average
     R = range_block - range_block_average
-    for a in range(24):
-        error = np.linalg.norm(a * D - R) ** 2
+    domain_block_size = np.shape(domain_block)[0]
+    range_block_size = domain_block_size
+    d21 = domain_block[:, :domain_block_size//2]
+    D21 = d21 - np.average(d21)
+    r21 = range_block[:, :range_block_size // 2]
+    R21 = r21 - np.average(r21)
+
+    for a in range(-6, 7):
+        a = a * 0.1
+        error = np.linalg.norm(a * D21 - R21) ** 2
+        if error > error_threshold and error >= min_error:
+            continue
+        else:
+            error = np.linalg.norm(a * D - R) ** 2
+
         if error < min_error:
             min_error = error
             best_a = a
-        if min_error < error_threshold:
-            break
-    print(error, error_threshold)
+        # if error < error_threshold:
+        #     break
+
     return min_error, best_a, range_block_average
 
 
@@ -62,13 +78,12 @@ def octtree_compress(img, range_size, error_threshold=0, min_range_size=2):
                     for j in range(0, width, range_size)]
     uncovered_range_blocks = deque(range_blocks)
     while len(uncovered_range_blocks):
-        if len(uncovered_range_blocks) % 300 == 0:
-            print(len(uncovered_range_blocks))
+
         range_block = uncovered_range_blocks.popleft()
         range_block_frames = img[
                              range_block.start_frame:range_block.start_frame + range_block.size,
-                             range_block.start_x:range_block.start_x + range_block.size,
-                             range_block.start_y:range_block.start_y + range_block.size
+                                range_block.start_y:range_block.start_y + range_block.size,
+                             range_block.start_x:range_block.start_x + range_block.size
                              ]
 
         domain_startx, domain_starty, domain_endx, domain_endy, domain_start_frames, domain_end_frames = find_domain_start(
@@ -76,12 +91,12 @@ def octtree_compress(img, range_size, error_threshold=0, min_range_size=2):
 
         domain_block_frames = img[
                                   domain_start_frames:domain_end_frames,
-                                  domain_starty:domain_endy,
-                                  domain_startx:domain_endx
+                                    domain_starty:domain_endy,
+                                    domain_startx:domain_endx,
                               ]
         reduced_domain_block_frames = reduce(domain_block_frames)
-
-        new_error_threshold = error_threshold  ** (range_size/range_block.size) + 1
+        level = int(math.log(range_size / range_block.size, 2))
+        new_error_threshold = error_threshold ** (2 ** level) + (2 ** level) - 1
         error, a, r = distance(range_block_frames, reduced_domain_block_frames, new_error_threshold)
         if error < new_error_threshold or range_block.size == min_range_size:
             transformations.append(
@@ -124,11 +139,12 @@ def octtree_decompress(transformations, output_size, num_frames, number_iteratio
                 range_block)
             S = reduce(iterations[-1][domain_start_frame:domain_end_frame, domain_starty:domain_endy,
                        domain_startx:domain_endx])
-            D = S * a + r
+            average = np.average(S)
+            D = (S - average) * a + r
             cur_video[
                 start_frame:start_frame + range_block_size * factor,
-                start_x:start_x + range_block_size * factor,
-                start_y:start_y + range_block_size * factor
+                start_y:start_y + range_block_size * factor,
+                start_x:start_x + range_block_size * factor
             ] = D
         iterations.append(cur_video)
         cur_video = np.zeros((num_frames, output_size, output_size))
@@ -141,7 +157,7 @@ def test_greyscale():
     transformations = []
     plt.figure()
     # plt.imshow(img, cmap='gray', interpolation='none')
-    transformations = octtree_compress(img, 16, 2, 4)
+    transformations = octtree_compress(img, 16, 2, 2)
     pickle.dump(transformations, open("transformationsNoSearch.pkl", "wb"))
     if not transformations:
         transformations = pickle.load(open("transformationsNoSearch.pkl", "rb"))

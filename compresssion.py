@@ -62,6 +62,7 @@ def find_contrast_and_brightness2(D, S):
     b = np.reshape(D, (D.size,))
     x, _, _, _ = np.linalg.lstsq(A, b)
     # x = optimize.lsq_linear(A, b, [(-np.inf, -2.0), (np.inf, 2.0)]).x
+    print(x[1], x[0])
     return x[1], x[0]
 
 
