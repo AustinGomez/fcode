@@ -3,3 +3,4 @@ venv/
 .DS_store
 .vscode/
 __pycache__/
+*.mp4
