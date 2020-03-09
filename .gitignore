@@ -4,3 +4,4 @@ venv/
 .vscode/
 __pycache__/
 *.mp4
+*.pkl
