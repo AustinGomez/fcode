@@ -10,6 +10,9 @@ from cv2 import imread
 # Transformations
 
 
+def reduce(img):
+    return ndimage.zoom(img, 0.5)
+
 def find_contrast_and_brightness2(D, S):
     # Fit the contrast and the brightness
     A = np.concatenate((np.ones((S.size, 1)), np.reshape(S, (S.size, 1))), axis=1)
@@ -20,7 +23,7 @@ def find_contrast_and_brightness2(D, S):
     return x[1], x[0]
 
 
-def distance(range_block, domain_block, error_threshold=0):
+def distance(range_block, domain_block, error_threshold):
     #a, b = find_contrast_and_brightness2(range_block, domain_block)
     #error = np.linalg.norm(a * D - R) ** 2
     #return error, a, b
@@ -36,10 +39,11 @@ def distance(range_block, domain_block, error_threshold=0):
     r21 = range_block[:, :range_block_size // 2]
     R21 = r21 - np.average(r21)
 
-    for a in range(-10, 11):
-        a = a * 0.1
-        error = np.linalg.norm(a * D21 - R21) ** 2
-        if error > error_threshold and error >= min_error:
+    for a in range(-5, 6):
+        a = a * (1/8)
+        #error = np.linalg.norm(a * D21 - R21) ** 2
+        # if error > error_threshold and error >= min_error:
+        if False:
             continue
         else:
             error = np.linalg.norm(a * D - R) ** 2
@@ -47,6 +51,7 @@ def distance(range_block, domain_block, error_threshold=0):
         if error < min_error:
             min_error = error
             best_a = a
+
 
     return min_error, best_a, range_block_average
 
@@ -162,11 +167,11 @@ def test_greyscale():
     transformations = []
     plt.figure()
     # plt.imshow(img, cmap='gray', interpolation='none')
-    # transformations = quadtree_compress(img, 16, 50, 2)
-    # pickle.dump(transformations, open("transformationsNoSearch.pkl", "wb"))
+    transformations = quadtree_compress(img, 16, 50, 2)
+    pickle.dump(transformations, open("transformationsNoSearch.pkl", "wb"))
     if not transformations:
         transformations = pickle.load(open("transformationsNoSearch.pkl", "rb"))
-    iterations = quadtree_decompress(transformations, 4, 512, 8, factor=1)
+    iterations = quadtree_decompress(transformations, 4, 512, number_iterations=12, factor=1)
     # mpimg.imsave('lena1028.bmp', iterations[-1], cmap='gray')
     # iterations512 = decompress(transformations, 16, 8, 16, new_size=512)
     mpimg.imsave('lena512compressed.bmp', iterations[-1],  vmin=0, vmax=255, cmap='gray')
