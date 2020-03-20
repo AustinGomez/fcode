@@ -13,7 +13,8 @@
 using namespace cv;
 using namespace std;
 
-struct Block {
+struct Block
+{
     int startFrame;
     int startX;
     int startY;
@@ -21,45 +22,56 @@ struct Block {
     Scalar a;
     Scalar r;
 
-    Block(int startFrame, int startX, int startY, int size) : startFrame{ startFrame }, startX { startX }, startY{ startY }, size{ size } {}
+    Block(int startFrame, int startX, int startY, int size) : startFrame{startFrame}, startX{startX}, startY{startY}, size{size} {}
 };
 
-
-float findParamsAndError(const vector<Mat>& rangeBlock, const vector<Mat>& domainBlock, const int errorThreshold, Scalar& a, Scalar& r) {
+float findParamsAndError(const vector<Mat> &rangeBlock, const vector<Mat> &domainBlock, const int errorThreshold, Scalar &a, Scalar &r)
+{
     int minError = INT16_MAX;
     int error = minError;
     int bestA = -5;
 
     int frameCount = 0;
     Scalar sum;
-    for (auto& frame : rangeBlock) {
+    for (auto &frame : rangeBlock)
+    {
         frameCount += 1;
         sum += mean(frame);
     }
     r = sum / (Scalar)frameCount;
 
     sum = 0;
-    for (auto& frame : domainBlock) {
+    for (auto &frame : domainBlock)
+    {
         sum += mean(frame);
     }
     Scalar d_mean = sum / (Scalar)frameCount;
 
     a = 0.5;
-    for (float trialA = -1; trialA <= 1; trialA += 0.05) {
+    for (float trialA = -1; trialA <= 1; trialA += 0.05)
+    {
         float error = 0;
-        for (int z = 0; z < domainBlock.size(); ++z) {
-            for (int i = 0; i < domainBlock[z].size().height; ++i) {
-                for (int j = 0; j < domainBlock[z].size().height; ++j) {
+        for (int z = 0; z < domainBlock.size(); ++z)
+        {
+            for (int i = 0; i < domainBlock[z].size().height; ++i)
+            {
+                for (int j = 0; j < domainBlock[z].size().height; ++j)
+                {
                     error += pow(((domainBlock[z].at<uchar>(i, j) - d_mean.val[0]) * trialA) - (rangeBlock[z].at<uchar>(i, j) - r.val[0]), 2);
-                    if (error > errorThreshold || error > minError) break;
+                    if (error > errorThreshold || error > minError)
+                        break;
                 }
-                    if (error > errorThreshold || error > minError) break;
+                if (error > errorThreshold || error > minError)
+                    break;
             }
-                    if (error > errorThreshold || error > minError) break;
+            if (error > errorThreshold || error > minError)
+                break;
         }
-        
-        if (error > errorThreshold) continue;
-        if (error < minError) {
+
+        if (error > errorThreshold)
+            continue;
+        if (error < minError)
+        {
             minError = error;
             a = trialA;
         }
@@ -69,9 +81,9 @@ float findParamsAndError(const vector<Mat>& rangeBlock, const vector<Mat>& domai
     return minError;
 }
 
-
 // In this case, image is already reduced.
-vector<Mat> findReducedDomainBlock(const vector<Mat> &video, const Block &rangeBlock) {
+vector<Mat> findReducedDomainBlock(const vector<Mat> &video, const Block &rangeBlock)
+{
     vector<Mat> domainBlock;
     int domainBlockSize = rangeBlock.size * 2;
     int domainStartFrame = max(rangeBlock.startFrame - rangeBlock.size / 2, 0);
@@ -83,20 +95,24 @@ vector<Mat> findReducedDomainBlock(const vector<Mat> &video, const Block &rangeB
     int domainEndYCoordinate = domainStartYCoordinate + domainBlockSize;
 
     // This should be the number of frames.
-    if (domainEndFrame > video.size()) {
+    if (domainEndFrame > video.size())
+    {
         domainStartFrame = video.size() - domainBlockSize;
         domainEndFrame = domainStartFrame + domainBlockSize;
     }
-    if (domainEndXCoordinate > video[0].size().width) {
+    if (domainEndXCoordinate > video[0].size().width)
+    {
         domainStartXCoordinate = video[0].size().width - domainBlockSize;
         domainEndXCoordinate = domainStartXCoordinate + domainBlockSize;
     }
-    if (domainEndYCoordinate > video[0].size().height) {
+    if (domainEndYCoordinate > video[0].size().height)
+    {
         domainStartYCoordinate = video[0].size().height - domainBlockSize;
         domainEndYCoordinate = domainStartYCoordinate + domainBlockSize;
     }
 
-    for (int i = domainStartFrame; i < domainStartFrame + domainBlockSize; i += 2) {
+    for (int i = domainStartFrame; i < domainStartFrame + domainBlockSize; i += 2)
+    {
         Mat domainBlockFrame = video[i](Rect(domainStartXCoordinate, domainStartYCoordinate, domainBlockSize, domainBlockSize));
         Mat roi(rangeBlock.size, rangeBlock.size, CV_8U);
         resize(domainBlockFrame, roi, Size(), 0.5, 0.5);
@@ -114,7 +130,7 @@ vector<Mat> findReducedDomainBlock(const vector<Mat> &video, const Block &rangeB
     //    }
     //    domainBlock.push_back(roi);
     //}
-    
+
     //vector<Mat> domainBlock;
     //for (int i = domainStartFrame; i < domainEndFrame; ++i) {
     //    if (i % 2 == 0) continue;
@@ -123,70 +139,83 @@ vector<Mat> findReducedDomainBlock(const vector<Mat> &video, const Block &rangeB
     //    resize(roi, roi, Size(), 0.5, 0.5, INTER_NEAREST);
     //    domainBlock.push_back(roi);
     //}
-    return domainBlock; 
+    return domainBlock;
 }
 
-
-vector<Mat> preprocess(const vector<Mat>& video) {
+vector<Mat> preprocess(const vector<Mat> &video)
+{
     vector<Mat> result;
 
     int numFrames = video.size();
-    for (int z = 0; z < numFrames; ++z) {
+    for (int z = 0; z < numFrames; ++z)
+    {
         Mat frame = Mat(video[0].size(), CV_8U);
         result.push_back(frame);
-       for (int i = 0; i < video[0].size().height; ++i) {
-           for (int j = 0; j < video[0].size().width; ++j) {
-               int sum = 0;
-               int count = 0;
-               if (z > 0) {
-                   sum += video[z - 1].at<uchar>(i, j);
-                   ++count;
-               }
-               if (i > 0) {
-                   sum += video[z].at<uchar>(i - 1, j);
-                   ++count;
-               }
-               if (j > 0) {
-                   sum += video[z].at<uchar>(i, j - 1);
-                   ++count;
-               }
-               if (z < numFrames - 1) {
-                   sum += video[z + 1].at<uchar>(i, j);
-                   ++count;
-               }
-               if (i < video[0].size().height - 1) {
-                   sum += video[z].at<uchar>(i + 1, j);
-                   ++count;
-               }
-               if (j < video[0].size().width - 1) {
-                   sum += video[z].at<uchar>(i, j + 1);
-                   ++count;
-               }
+        for (int i = 0; i < video[0].size().height; ++i)
+        {
+            for (int j = 0; j < video[0].size().width; ++j)
+            {
+                int sum = 0;
+                int count = 0;
+                if (z > 0)
+                {
+                    sum += video[z - 1].at<uchar>(i, j);
+                    ++count;
+                }
+                if (i > 0)
+                {
+                    sum += video[z].at<uchar>(i - 1, j);
+                    ++count;
+                }
+                if (j > 0)
+                {
+                    sum += video[z].at<uchar>(i, j - 1);
+                    ++count;
+                }
+                if (z < numFrames - 1)
+                {
+                    sum += video[z + 1].at<uchar>(i, j);
+                    ++count;
+                }
+                if (i < video[0].size().height - 1)
+                {
+                    sum += video[z].at<uchar>(i + 1, j);
+                    ++count;
+                }
+                if (j < video[0].size().width - 1)
+                {
+                    sum += video[z].at<uchar>(i, j + 1);
+                    ++count;
+                }
 
-               result[z].at<uchar>(i, j) = sum / count;
-           }
-       }
-   }
-   return result;
+                result[z].at<uchar>(i, j) = sum / count;
+            }
+        }
+    }
+    return result;
 }
 
-
-vector<Block> compress(const vector<Mat> &video, const int startRangeSize, const int minRangeSize, const int errorThreshold) {
+vector<Block> compress(const vector<Mat> &video, const int startRangeSize, const int minRangeSize, const int errorThreshold)
+{
     vector<Block> transformations;
     int numFrames = video.size();
     int width = video[0].size().width;
     int height = video[0].size().height;
-    
+
     queue<Block> uncoveredRangeBlocks;
-    for (int z = 0; z < numFrames; z += startRangeSize) {
-        for (int i = 0; i < height; i += startRangeSize) {
-            for (int j = 0; j < width; j += startRangeSize) {
+    for (int z = 0; z < numFrames; z += startRangeSize)
+    {
+        for (int i = 0; i < height; i += startRangeSize)
+        {
+            for (int j = 0; j < width; j += startRangeSize)
+            {
                 uncoveredRangeBlocks.push(Block(z, i, j, startRangeSize));
             }
         }
     }
     vector<Mat> processedVideo = video;
-    while (uncoveredRangeBlocks.size() != 0) {
+    while (uncoveredRangeBlocks.size() != 0)
+    {
         //if (uncoveredRangeBlocks.size() % 10000 == 0) {
         //    cout << uncoveredRangeBlocks.size() << endl;
         //}
@@ -198,7 +227,8 @@ vector<Block> compress(const vector<Mat> &video, const int startRangeSize, const
         //Mat rangeBlockVideo = video(ranges);
 
         vector<Mat> rangeBlockVideo;
-        for (int i = rangeBlock.startFrame; i < rangeBlock.startFrame + rangeBlock.size; ++i) {
+        for (int i = rangeBlock.startFrame; i < rangeBlock.startFrame + rangeBlock.size; ++i)
+        {
             Mat rangeBlockFrame = video[i];
             Mat roi = rangeBlockFrame(Rect(rangeBlock.startX, rangeBlock.startY, rangeBlock.size, rangeBlock.size));
             rangeBlockVideo.push_back(roi);
@@ -206,8 +236,10 @@ vector<Block> compress(const vector<Mat> &video, const int startRangeSize, const
         vector<Mat> domainBlockVideo = findReducedDomainBlock(processedVideo, rangeBlock);
         int level = (int)log2(startRangeSize / rangeBlock.size);
         int newErrorThreshold;
-        if (rangeBlock.size == minRangeSize) newErrorThreshold = INT_MAX;
-        else newErrorThreshold = (pow(2, level))* errorThreshold + (pow(2, level)) - 1;
+        if (rangeBlock.size == minRangeSize)
+            newErrorThreshold = INT_MAX;
+        else
+            newErrorThreshold = (pow(2, level)) * errorThreshold + (pow(2, level)) - 1;
         Scalar a;
         Scalar r;
 
@@ -215,17 +247,20 @@ vector<Block> compress(const vector<Mat> &video, const int startRangeSize, const
         rangeBlock.a = a;
         rangeBlock.r = r;
         uncoveredRangeBlocks.pop();
-        if (error < newErrorThreshold || rangeBlock.size == minRangeSize) {
+        if (error < newErrorThreshold || rangeBlock.size == minRangeSize)
+        {
             transformations.push_back(rangeBlock);
-        } 
-        else { 
+        }
+        else
+        {
             int newRangeSize = rangeBlock.size / 2;
             uncoveredRangeBlocks.push(Block(rangeBlock.startFrame, rangeBlock.startX, rangeBlock.startY, newRangeSize));
             uncoveredRangeBlocks.push(Block(rangeBlock.startFrame, rangeBlock.startX + newRangeSize, rangeBlock.startY, newRangeSize));
             uncoveredRangeBlocks.push(Block(rangeBlock.startFrame, rangeBlock.startX, rangeBlock.startY + newRangeSize, newRangeSize));
             uncoveredRangeBlocks.push(Block(rangeBlock.startFrame, rangeBlock.startX + newRangeSize, rangeBlock.startY + newRangeSize, newRangeSize));
 
-            if (rangeBlock.startFrame + newRangeSize < numFrames) {
+            if (rangeBlock.startFrame + newRangeSize < numFrames)
+            {
                 uncoveredRangeBlocks.push(Block(rangeBlock.startFrame + newRangeSize, rangeBlock.startX, rangeBlock.startY, newRangeSize));
                 uncoveredRangeBlocks.push(Block(rangeBlock.startFrame + newRangeSize, rangeBlock.startX + newRangeSize, rangeBlock.startY, newRangeSize));
                 uncoveredRangeBlocks.push(Block(rangeBlock.startFrame + newRangeSize, rangeBlock.startX, rangeBlock.startY + newRangeSize, newRangeSize));
@@ -236,28 +271,33 @@ vector<Block> compress(const vector<Mat> &video, const int startRangeSize, const
     return transformations;
 }
 
-
-vector<Mat> decompress(const vector<Block> &transformations, const int numFrames, const int outputSize, const  int numberIterations=8) {
+vector<Mat> decompress(const vector<Block> &transformations, const int numFrames, const int outputSize, const int numberIterations = 8)
+{
     vector<vector<Mat>> iterations;
     vector<Mat> currentVideo;
-    for (int i = 0; i < numFrames; ++i) {
+    for (int i = 0; i < numFrames; ++i)
+    {
         currentVideo.push_back(Mat(cv::Size(outputSize, outputSize), CV_8U));
     }
     vector<Mat> firstVideo = vector<Mat>(currentVideo);
     iterations.push_back(firstVideo);
     cout << transformations.size() << endl;
-    for (int i = 0; i < numberIterations; ++i) {
+    for (int i = 0; i < numberIterations; ++i)
+    {
         cout << i << endl;
         vector<Mat> processedVideo = iterations.back();
-        for (auto& rangeBlock : transformations) {
+        for (auto &rangeBlock : transformations)
+        {
             vector<Mat> domainBlock = findReducedDomainBlock(processedVideo, rangeBlock);
             Scalar sum = 0;
             vector<Scalar> means;
-            for (auto& frame : domainBlock) {
+            for (auto &frame : domainBlock)
+            {
                 sum += mean(frame);
             }
             Scalar average = sum / (Scalar)rangeBlock.size;
-            for (int z = 0; z < rangeBlock.size; z++) {
+            for (int z = 0; z < rangeBlock.size; z++)
+            {
                 domainBlock[z] = (domainBlock[z] - average.val[0]) * rangeBlock.a.val[0] + rangeBlock.r.val[0];
                 //if (z < domainBlock.size() - 1) domainBlock[z] = domainBlock[z] - mean(domainBlock[z + 1]);
                 domainBlock[z].copyTo(currentVideo[z + rangeBlock.startFrame](Rect(rangeBlock.startX, rangeBlock.startY, rangeBlock.size, rangeBlock.size)));
@@ -284,39 +324,41 @@ vector<Mat> decompress(const vector<Block> &transformations, const int numFrames
     return iterations.back();
 }
 
-
-
 int main()
 {
-    string fileName = "bunny_uncompressed";
-	VideoCapture cap("C:\\Users\\austi\\Videos\\" + fileName + ".y4m");
+    string fileName = "sintel";
+    string fileExtension = ".y4m";
+    VideoCapture cap("/Users/Austin/dev/fcode/" + fileName + fileExtension);
 
-    if (!cap.isOpened()) {
+    if (!cap.isOpened())
+    {
         std::cout << "Error opening video stream or file" << endl;
         return -1;
     }
 
     vector<Mat> frames;
     int frameCount = 0;
-    int skipFrames = 1152;
+    int skipFrames = 600;
     int skippedFrames = 0;
     int maxFrames = 32;
     int outputSize = 720;
-    while (frameCount < maxFrames) {
+    while (frameCount < maxFrames)
+    {
         Mat frame, greyFrame;
         cap >> frame;
-        if (frame.empty()) {
+        if (frame.empty())
+        {
             break;
         }
-        if (skippedFrames < skipFrames) {
+        if (skippedFrames < skipFrames)
+        {
             skippedFrames++;
             continue;
         }
         ++frameCount;
         cvtColor(frame, greyFrame, COLOR_BGR2GRAY);
         frames.push_back(greyFrame(Rect(256, 0, outputSize, outputSize)));
-     }
-    cout << "Compressing.. " << endl;
+    }
     chrono::steady_clock::time_point begin = chrono::steady_clock::now();
     vector<Block> transformations = compress(frames, 16, 2, 5);
     chrono::steady_clock::time_point end = chrono::steady_clock::now();
@@ -327,7 +369,8 @@ int main()
     cout << "Done in " << (float)chrono::duration_cast<chrono::microseconds>(end - begin).count() / 1000000 << "seconds" << endl;
     VideoWriter video(fileName + "c.mp4", VideoWriter::fourcc('m', 'p', '4', 'v'), 24, Size(outputSize, outputSize), false);
 
-    for (Mat& frame : decompressed) {
+    for (Mat &frame : decompressed)
+    {
         video.write(frame);
     }
     cap.release();
@@ -335,4 +378,3 @@ int main()
 
     return 0;
 }
-

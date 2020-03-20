@@ -6,3 +6,11 @@ __pycache__/
 *.mp4
 *.pkl
 .vs/
+cmake-build*
+image
+image.dSYM/
+lena512cpp.bmp
+sintel.y4m
+video
+video.dSYM/
+videoChunked
