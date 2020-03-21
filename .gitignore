@@ -3,6 +3,7 @@ venv/
 .DS_store
 .vscode/
 __pycache__/
+*.pdf
 *.mp4
 *.pkl
 *.MOV
