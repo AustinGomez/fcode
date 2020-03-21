@@ -148,6 +148,7 @@ Scalar getVideoAverage(const vector<Mat> &video) {
     return frameSum[0] / (Scalar) (numPixels * frameCount);
 }
 
+// Check all frames to see if they meet the error threshold.
 float
 findParamsAndError(const vector<Mat> &rangeBlock, const vector<Mat> &domainBlock, const float errorThreshold, Scalar &a,
                    Scalar &r) {
@@ -159,7 +160,7 @@ findParamsAndError(const vector<Mat> &rangeBlock, const vector<Mat> &domainBlock
     //cout << d_mean << " " << r << endl;
     a = 0.5;
     float maxFrameError = INT_MIN;
-    for (float trialA = -0.75; trialA <= 0.75; trialA += 0.125) {
+    for (float trialA = -0.5; trialA <= 0.5; trialA += 0.125) {
         error = 0;
         maxFrameError = 0;
         float count = 0;
@@ -167,15 +168,16 @@ findParamsAndError(const vector<Mat> &rangeBlock, const vector<Mat> &domainBlock
 //            float frameError = pow(norm((domainBlock[z] - d_mean) * trialA + r, rangeBlock[z]), 2);
             float frameError = 0;
             for (int i = 0; i < domainBlock[z].size().height; ++i) {
-               for (int j = 0; j < domainBlock[z].size().height; ++j) {
+                for (int j = 0; j < domainBlock[z].size().height; ++j) {
                     ++count;
                     frameError += pow(((domainBlock[z].at<uchar>(i, j) - d_mean.val[0]) * trialA) -
-                                         (rangeBlock[z].at<uchar>(i, j) - r.val[0]),
-                                         2);
+                                      (rangeBlock[z].at<uchar>(i, j) - r.val[0]),
+                                      2);
                 }
             }
             error += frameError;
             if (frameError > maxFrameError) maxFrameError = frameError;
+            //if (frameError > minError) break;
         }
         //error = error / count;
         //error = sqrt(error);
@@ -204,7 +206,7 @@ compress(const vector<Mat> &video, const int startRangeSize, const int minRangeS
             }
         }
     }
-    vector<Mat> processedVideo = video;
+    vector<Mat> processedVideo = preprocess(video);
     while (!uncoveredRangeBlocks.empty()) {
         Block rangeBlock = uncoveredRangeBlocks.front();
         uncoveredRangeBlocks.pop();
@@ -214,14 +216,14 @@ compress(const vector<Mat> &video, const int startRangeSize, const int minRangeS
             Mat roi = rangeBlockFrame(Rect(rangeBlock.startX, rangeBlock.startY, rangeBlock.size, rangeBlock.size));
             rangeBlockVideo.push_back(roi);
         }
-        vector<Mat> domainBlockVideo = findReducedDomainBlockNOPREPROCESSING(processedVideo, rangeBlock);
+        vector<Mat> domainBlockVideo = findReducedDomainBlock(processedVideo, rangeBlock);
         int level = (int) log2(startRangeSize / rangeBlock.size);
         float newErrorThreshold;
         if (rangeBlock.numFrames == 1)
             newErrorThreshold = INT_MAX;
         else
-            newErrorThreshold = errorThreshold; //(float) errorThreshold / (float) pow(2, level); // (pow(2, level)) * errorThreshold + (pow(2, level)) - 1;
-            //cout << newErrorThreshold << endl;
+            newErrorThreshold = (pow(2, level)) * errorThreshold + (pow(2, level)) - 1;
+        //cout << newErrorThreshold << endl;
         Scalar a;
         Scalar r;
 
@@ -279,9 +281,9 @@ vector<Mat> decompress(const vector<Block> &transformations, const int numFrames
     iterations.push_back(firstVideo);
     for (int i = 0; i < numberIterations; ++i) {
         //cout << i << endl;
-        vector<Mat> processedVideo = iterations.back();
+        vector<Mat> processedVideo = preprocess(iterations.back());
         for (auto &rangeBlock : transformations) {
-            vector<Mat> domainBlock = findReducedDomainBlockNOPREPROCESSING(processedVideo, rangeBlock);
+            vector<Mat> domainBlock = findReducedDomainBlock(processedVideo, rangeBlock);
             Scalar average = getVideoAverage(domainBlock);
             for (int z = 0; z < rangeBlock.numFrames; z++) {
                 domainBlock[z] = (domainBlock[z] - average) * rangeBlock.a.val[0] + rangeBlock.r.val[0];
@@ -309,11 +311,11 @@ vector<Mat> decompress(const vector<Block> &transformations, const int numFrames
 int main() {
 
     // PARAMS
-    int startBlockSize = 32;
+    int startBlockSize = 16;
     int minBlockSize = 2;
-    int errorThreshold = 39;
-    int numberIterations = 6;
-    bool showOutlines = false;
+    int errorThreshold = 20;
+    int numberIterations = 9;
+    bool showOutlines = 0;
 
     string fileName = "sintel";
     string fileExtension = ".y4m";
@@ -325,11 +327,11 @@ int main() {
     }
 
     vector<Mat> frames;
-    long frameCount = 0;
-    int skipFrames = 0;
+    int frameCount = 0;
+    int skipFrames = 128;
     int skippedFrames = 0;
     long transformationCount = 0;
-    int maxFrames = 1024;
+    int maxFrames = 32;
     int outputSize = 704;
     float totalTime = 0;
     int blockSize = 32;
