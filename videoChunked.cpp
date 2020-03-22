@@ -18,16 +18,19 @@ struct Block {
     int size;
     int numFrames;
     int error;
+    int level=0;
     Scalar a;
     Scalar r;
-    Block *q1;
-    Block *q2;
-    Block *q3;
-    Block *q4;
+    vector<Block *> children;
+    bool hasChildren = false;
 
-    Block(int startFrame, int startX, int startY, int size, int numFrames = 0) : startFrame{startFrame}, startX{startX},
-                                                                                 startY{startY}, size{size}, numFrames{
-                    numFrames == 0 ? size : numFrames} {}
+    Block(int startFrame, int startX, int startY, int size, int numFrames = 0, int level=0):
+    startFrame{startFrame},
+    startX{startX},
+    startY{startY},
+    size{size},
+    numFrames{ numFrames == 0 ? size : numFrames},
+    level{level} {};
 };
 
 Scalar getMSSIM( const Mat& i1, const Mat& i2)
@@ -105,13 +108,13 @@ double getPSNR(const Mat& I1, const Mat& I2)
 }
 
 // In this case, image is already reduced.
-vector<Mat> findReducedDomainBlock(const vector<Mat> &video, const Block &rangeBlock) {
-    int domainBlockSize = rangeBlock.size * 2;
-    int domainStartFrame = rangeBlock.startFrame;
-    int domainStartXCoordinate = max(rangeBlock.startX - rangeBlock.size / 2, 0);
-    int domainStartYCoordinate = max(rangeBlock.startY - rangeBlock.size / 2, 0);
+vector<Mat> findReducedDomainBlock(const vector<Mat> &video, const Block *rangeBlock) {
+    int domainBlockSize = rangeBlock->size * 2;
+    int domainStartFrame = rangeBlock->startFrame;
+    int domainStartXCoordinate = max(rangeBlock->startX - rangeBlock->size / 2, 0);
+    int domainStartYCoordinate = max(rangeBlock->startY - rangeBlock->size / 2, 0);
 
-    int domainEndFrame = domainStartFrame + rangeBlock.numFrames;
+    int domainEndFrame = domainStartFrame + rangeBlock->numFrames;
     int domainEndXCoordinate = domainStartXCoordinate + domainBlockSize;
     int domainEndYCoordinate = domainStartYCoordinate + domainBlockSize;
 
@@ -125,11 +128,11 @@ vector<Mat> findReducedDomainBlock(const vector<Mat> &video, const Block &rangeB
     }
 
     vector<Mat> domainBlock;
-    for (int i = rangeBlock.startFrame; i < rangeBlock.startFrame + rangeBlock.numFrames; ++i) {
-        Mat roi(rangeBlock.size, rangeBlock.size, CV_8U);
+    for (int i = rangeBlock->startFrame; i < rangeBlock->startFrame + rangeBlock->numFrames; ++i) {
+        Mat roi(rangeBlock->size, rangeBlock->size, CV_8U);
         for (int j = 0; j < domainBlockSize; j += 2) {
             for (int k = 0; k < domainBlockSize; k += 2) {
-                roi.at<uchar>(k / 2, j / 2) = video[i].at<uchar>(k + domainStartYCoordinate, j + domainStartXCoordinate);
+                roi.at<uchar>(k / 2, j / 2) = video[i].at<uchar>(k, j);
             }
         }
         domainBlock.push_back(roi);
@@ -183,7 +186,47 @@ Scalar getVideoAverage(const vector<Mat> &video) {
     return frameSum[0] / (Scalar) (numPixels * frameCount);
 }
 
+void octTreeDown(Block *block, queue<Block *> &blockQueue, const int maxDepth) {
+    block->hasChildren = true;
+    int newLevel = block->level + 1;
+    if (block->level < maxDepth) {
+        int newRangeSize = block->size / 2;
+        int newNumFrames = newRangeSize;
+        Block *q1 = new Block(block->startFrame, block->startX, block->startY, newRangeSize, newNumFrames, newLevel);
+        Block *q2 = new Block(block->startFrame, block->startX + newRangeSize, block->startY, newRangeSize, newNumFrames, newLevel);
+        Block *q3 = new Block(block->startFrame, block->startX, block->startY + newRangeSize, newRangeSize, newNumFrames, newLevel);
+        Block *q4 = new Block(block->startFrame, block->startX + newRangeSize, block->startY + newRangeSize, newRangeSize, newNumFrames, newLevel);
 
+        Block *q5 = new Block(block->startFrame + newRangeSize, block->startX, block->startY, newRangeSize, newNumFrames, newLevel);
+        Block *q6 = new Block(block->startFrame + newRangeSize, block->startX + newRangeSize, block->startY, newRangeSize, newNumFrames, newLevel);
+        Block *q7 = new Block(block->startFrame + newRangeSize, block->startX, block->startY + newRangeSize, newRangeSize, newNumFrames, newLevel);
+        Block *q8 = new Block(block->startFrame + newRangeSize, block->startX + newRangeSize, block->startY + newRangeSize, newRangeSize, newNumFrames, newLevel);
+
+        blockQueue.push(q1);
+        blockQueue.push(q2);
+        blockQueue.push(q3);
+        blockQueue.push(q4);
+        blockQueue.push(q5);
+        blockQueue.push(q6);
+        blockQueue.push(q7);
+        blockQueue.push(q8);
+
+        block->children.push_back(q1);
+        block->children.push_back(q2);
+        block->children.push_back(q3);
+        block->children.push_back(q4);
+        block->children.push_back(q5);
+        block->children.push_back(q6);
+        block->children.push_back(q7);
+        block->children.push_back(q8);
+    } else {
+        for (int i = 0; i < block->numFrames; ++i) {
+            Block * newChild = new Block(block->startFrame + i, block->startX, block->startY, block->size, 1, newLevel);
+            blockQueue.push(newChild);
+            block->children.push_back(newChild);
+        }
+    }
+}
 
 // Check all frames to see if they meet the error threshold.
 float
@@ -218,103 +261,143 @@ findParamsAndError(const vector<Mat> &rangeBlock, const vector<Mat> &domainBlock
             a = trialA;
         }
     }
+    if (rangeBlock.size() == 1) cout << maxFrameError << " " << a << endl;
     return maxFrameError;
 }
 
-vector<Block>
+vector<Block *>
 compress(const vector<Mat> &video, const int startRangeSize, const int minRangeSize, const int errorThreshold) {
+    int maxDepth = (int) log2(startRangeSize / minRangeSize);
     vector<Block> transformations;
     int numFrames = video.size();
     int width = video[0].size().width;
     int height = video[0].size().height;
 
-    queue<Block> uncoveredRangeBlocks;
+    queue<Block *> uncoveredRangeBlocks;
+    vector<Block *> topRangeBlocks;
     for (int z = 0; z < numFrames; z += startRangeSize) {
         for (int i = 0; i < height; i += startRangeSize) {
             for (int j = 0; j < width; j += startRangeSize) {
-                uncoveredRangeBlocks.push(Block(z, i, j, startRangeSize));
+                Block *rangeBlock = new Block(z, j, i, startRangeSize, startRangeSize, 0);
+                uncoveredRangeBlocks.push(rangeBlock);
+                topRangeBlocks.push_back(rangeBlock);
             }
         }
     }
     vector<Mat> processedVideo = preprocess(video);
     while (!uncoveredRangeBlocks.empty()) {
-        Block rangeBlock = uncoveredRangeBlocks.front();
+        Block *rangeBlock = uncoveredRangeBlocks.front();
         uncoveredRangeBlocks.pop();
+
         vector<Mat> rangeBlockVideo;
-        for (int i = rangeBlock.startFrame; i < rangeBlock.startFrame + rangeBlock.numFrames; ++i) {
+        for (int i = rangeBlock->startFrame; i < rangeBlock->startFrame + rangeBlock->numFrames; ++i) {
             Mat rangeBlockFrame = video[i];
-            Mat roi = rangeBlockFrame(Rect(rangeBlock.startX, rangeBlock.startY, rangeBlock.size, rangeBlock.size));
+            Mat roi = rangeBlockFrame(Rect(rangeBlock->startX, rangeBlock->startY, rangeBlock->size, rangeBlock->size));
             rangeBlockVideo.push_back(roi);
         }
+
         vector<Mat> domainBlockVideo = findReducedDomainBlock(processedVideo, rangeBlock);
-        int level = (int) log2(startRangeSize / rangeBlock.size);
-        float newErrorThreshold;
-        if (rangeBlock.numFrames == 1)
-            newErrorThreshold = INT_MAX;
-        else
-            newErrorThreshold = errorThreshold;
+
+        float newErrorThreshold = errorThreshold;
+        if (rangeBlock->numFrames == 1) newErrorThreshold = INT_MAX;
+
         Scalar a;
         Scalar r;
-
         float error = findParamsAndError(rangeBlockVideo, domainBlockVideo, newErrorThreshold, a, r);
-        rangeBlock.a = a;
-        rangeBlock.r = r;
-        if (error < newErrorThreshold || rangeBlock.numFrames == 1) {
-            transformations.push_back(rangeBlock);
-        } else {
-            if (rangeBlock.size != minRangeSize) {
-                int newRangeSize = rangeBlock.size / 2; int newNumFrames = newRangeSize;
-                uncoveredRangeBlocks.push(
-                        Block(rangeBlock.startFrame, rangeBlock.startX, rangeBlock.startY, newRangeSize, newNumFrames));
-                uncoveredRangeBlocks.push(
-                        Block(rangeBlock.startFrame, rangeBlock.startX + newRangeSize, rangeBlock.startY, newRangeSize,
-                              newNumFrames));
-                uncoveredRangeBlocks.push(
-                        Block(rangeBlock.startFrame, rangeBlock.startX, rangeBlock.startY + newRangeSize, newRangeSize,
-                              newNumFrames));
-                uncoveredRangeBlocks.push(
-                        Block(rangeBlock.startFrame, rangeBlock.startX + newRangeSize, rangeBlock.startY + newRangeSize,
-                              newRangeSize, newNumFrames));
+        rangeBlock->a = a;
+        rangeBlock->r = r;
 
-                uncoveredRangeBlocks.push(
-                        Block(rangeBlock.startFrame + newRangeSize, rangeBlock.startX, rangeBlock.startY, newRangeSize,
-                              newNumFrames));
-                uncoveredRangeBlocks.push(
-                        Block(rangeBlock.startFrame + newRangeSize, rangeBlock.startX + newRangeSize, rangeBlock.startY,
-                              newRangeSize, newNumFrames));
-                uncoveredRangeBlocks.push(
-                        Block(rangeBlock.startFrame + newRangeSize, rangeBlock.startX, rangeBlock.startY + newRangeSize,
-                              newRangeSize, newNumFrames));
-                uncoveredRangeBlocks.push(Block(rangeBlock.startFrame + newRangeSize, rangeBlock.startX + newRangeSize,
-                                                rangeBlock.startY + newRangeSize, newRangeSize, newNumFrames));
-            } else {
-                for (int i = 0; i < rangeBlock.numFrames; ++i) {
-                    uncoveredRangeBlocks.push(
-                            Block(rangeBlock.startFrame + i, rangeBlock.startX, rangeBlock.startY, rangeBlock.size, 1));
-                }
+        if (error > newErrorThreshold && rangeBlock->numFrames != 1) {
+            octTreeDown(rangeBlock, uncoveredRangeBlocks, maxDepth);
+        } else {
+            //if (rangeBlock->size == 16) {
+            //    cout << "Here" << endl;
+            //}
+        }
+    }
+    return topRangeBlocks;
+}
+
+
+void drawPartitions(Mat &block) {
+    for (int k = 0; k < block.size().height; ++k) {
+        for (int j = 0; j < block.size().height; ++j) {
+            if (k == 0 || k == block.size().height - 1 || j == 0 ||
+                j == block.size().height - 1) {
+                block.at<uchar>(k, j) = 0;
             }
         }
     }
-    return transformations;
 }
 
-vector<Mat> decompress(const vector<Block> &transformations, const int numFrames, const int outputSize,
-                       const int numberIterations = 8, bool showOutlines = false) {
+vector<Mat> decompress(const vector<Block *> &topRangeBlocks, const int numFrames, const int outputSize,
+                       const int numberIterations = 8, bool showOutlines = false, const int maxDepth=4) {
     vector<vector<Mat>> iterations;
     vector<Mat> currentVideo;
     for (int i = 0; i < numFrames; ++i) {
-        currentVideo.emplace_back(Mat(cv::Size(outputSize, outputSize), CV_8U));
+        currentVideo.push_back(Mat(cv::Size(outputSize, outputSize), CV_8U, Scalar(0)));
     }
     vector<Mat> firstVideo = vector<Mat>(currentVideo);
     iterations.push_back(firstVideo);
+
+    queue<Block *> uncheckedRangeBlocks;
+    vector<Block *> rangeBlocks;
+    int startRangeSize = outputSize / (int) sqrt(topRangeBlocks.size());
+    for (int k = 0; k < topRangeBlocks.size(); ++k) {
+        Block *block = topRangeBlocks[k];
+        block->numFrames = numFrames;
+        block->size = startRangeSize;
+        block->level = 0;
+        block->startFrame = 0;
+        block->startX = ((startRangeSize * k) % outputSize);
+        block->startY = startRangeSize * ((startRangeSize * k) / outputSize);
+        block->hasChildren = topRangeBlocks[k]->hasChildren;
+        uncheckedRangeBlocks.push(block);
+    }
+
+    while (!uncheckedRangeBlocks.empty()) {
+        Block *rangeBlock = uncheckedRangeBlocks.front();
+        uncheckedRangeBlocks.pop();
+        if (rangeBlock->hasChildren) {
+            for (int i = 0; i < rangeBlock->children.size(); ++i) {
+                Block *child = rangeBlock->children[i];
+                child->level = rangeBlock->level + 1;
+                if (rangeBlock->level < maxDepth) {
+                    child->size = rangeBlock->size / 2;
+                    child->numFrames = numFrames / (pow(2, child->level));
+                    child->startX = (i % 2 == 0) ? rangeBlock->startX : rangeBlock->startX + child->size;
+                    child->startY = (i == 2 || i == 3 || i == 6 || i == 7) ? rangeBlock->startY : rangeBlock->startY +
+                                                                                                  child->size;
+                    child->startFrame = (i < 4) ? rangeBlock->startFrame : rangeBlock->startFrame + child->numFrames;
+                    uncheckedRangeBlocks.push(child);
+                } else {
+                    child->size = rangeBlock->size;
+                    child->numFrames = 1;
+                    child->startX = rangeBlock->startX;
+                    child->startY = rangeBlock->startY;
+                    child->startFrame = rangeBlock->startFrame + i;
+                    rangeBlocks.push_back(child);
+                }
+            }
+        }
+        else {
+            rangeBlocks.push_back(rangeBlock);
+        }
+    }
+
     for (int i = 0; i < numberIterations; ++i) {
         vector<Mat> processedVideo = preprocess(iterations.back());
-        for (auto &rangeBlock : transformations) {
+        cout << rangeBlocks.size() << endl;
+        namedWindow( "window", WINDOW_AUTOSIZE );// Create a window for display.
+        int counter = 0;
+        for (auto &rangeBlock : rangeBlocks) {
+            counter++;
             vector<Mat> domainBlock = findReducedDomainBlock(processedVideo, rangeBlock);
             Scalar average = getVideoAverage(domainBlock);
-            for (int z = 0; z < rangeBlock.numFrames; z++) {
-                domainBlock[z] = (domainBlock[z] - average) * rangeBlock.a.val[0] + rangeBlock.r.val[0];
-
+            for (int z = 0; z < rangeBlock->numFrames; z++) {
+                domainBlock[z] = (domainBlock[z] - average) * rangeBlock->a.val[0] + rangeBlock->r.val[0];
+                // Show outlines
+                showOutlines = rangeBlocks.size() > 90000;
                 if (showOutlines && i == numberIterations - 1) {
                     for (int k = 0; k < domainBlock[z].size().height; ++k) {
                         for (int j = 0; j < domainBlock[z].size().height; ++j) {
@@ -325,10 +408,16 @@ vector<Mat> decompress(const vector<Block> &transformations, const int numFrames
                         }
                     }
                 }
-                domainBlock[z].copyTo(currentVideo[z + rangeBlock.startFrame](
-                        Rect(rangeBlock.startX, rangeBlock.startY, rangeBlock.size, rangeBlock.size)));
+                //if (showOutlines && i == numberIterations - 1) drawPartitions(domainBlock[z]);
+                domainBlock[z].copyTo(currentVideo[z + rangeBlock->startFrame](
+                        Rect(rangeBlock->startX, rangeBlock->startY, rangeBlock->size, rangeBlock->size)));
+                if (i == 0 && counter % 1000 == 0) {
+                    imshow("window",currentVideo[z + rangeBlock->startFrame]);
+                    waitKey(0);
+                }
             }
         }
+
         iterations.emplace_back(vector<Mat>(currentVideo));
         currentVideo = vector<Mat>(iterations.back());
     }
@@ -339,12 +428,12 @@ vector<Mat> generateVideo(const vector<Mat> &frames, const int &outputSize) {
     // PARAMS
     int startBlockSize = 32;
     int minBlockSize = 2;
-    int errorThreshold = 10;
-    int numberIterations = 6;
+    int errorThreshold = 100;
+    int numberIterations = 5;
     bool showOutlines = 0;
     int blockSize = 32;
     cout << "Compressing block..." << endl;
-    vector<Block> transformations = compress(frames, startBlockSize, minBlockSize, errorThreshold);
+    vector<Block *> transformations = compress(frames, startBlockSize, 2, errorThreshold);
     cout << "Done compressing" << endl;
     cout << "Decompressing block..." << endl;
     vector<Mat> decompressed = decompress(transformations,
@@ -357,7 +446,7 @@ vector<Mat> generateVideo(const vector<Mat> &frames, const int &outputSize) {
 }
 
 int main() {
-    int outputSize = 1024;
+    int outputSize = 128;
     int skipFrames = 0;
     int maxFrames = 32;
 
@@ -397,29 +486,30 @@ int main() {
         if (frame.empty()) {
             break;
         }
+
         ++frameCount;
-        frames.push_back(frame(Rect(0, 0, outputSize, outputSize)));
+        Rect roi(0, 280, outputSize, outputSize);
+        frames.push_back(frame(roi));
         Mat channels[3];
         Mat ycrcb;
         //cvtColor(frame(Rect(0, 0, outputSize, outputSize)), frame);
         //cvtColor(frame(Rect(0, 0, outputSize, outputSize)), frame, COLOR_BGR2YCrCb);
-        cvtColor(frame(Rect(0, 0, outputSize, outputSize)), ycrcb, COLOR_RGB2YCrCb);
-        split(frame(Rect(0, 0, outputSize, outputSize)), channels);
+        cvtColor(frame(roi), ycrcb, COLOR_BGR2YCrCb);
+        split(ycrcb, channels);
 
         // Reduce the size of the non luminance channels.
-        //resize(channels[1], channels[1], Size(), 1, 0.25);
-        //resize(channels[2], channels[2], Size(), 0.25, 0.25);
+        resize(channels[1], channels[1], Size(), 0.5, 0.5);
+        resize(channels[2], channels[2], Size(), 0.5, 0.5);
 
         channel0.push_back(channels[0]);
         channel1.push_back(channels[1]);
         channel2.push_back(channels[2]);
 
 
-        vector<Mat> decompressedChannel0;
-        vector<Mat> decompressedChannel1;
-        vector<Mat> decompressedChannel2;
-        vector<Mat> videoFrames;
         if (frameCount % 32 == 0) {
+            vector<Mat> decompressedChannel0;
+            vector<Mat> decompressedChannel1;
+            vector<Mat> decompressedChannel2;
             decompressedChannel0 = generateVideo(channel0, outputSize);
             decompressedChannel1 = generateVideo(channel1, outputSize);
             decompressedChannel2 = generateVideo(channel2, outputSize);
@@ -431,7 +521,7 @@ int main() {
                 newChannels.push_back(decompressedChannel2[i]);
                 Mat newFrame;
                 merge(newChannels, newFrame);
-                //cvtColor(newFrame, newFrame, COLOR_YCrCb2BGR);
+                cvtColor(newFrame, newFrame, COLOR_YCrCb2BGR);
                 //cvtColor(newFrame, newFrame, COLOR_BGR2GRAY);
                 newVideo.push_back(newFrame);
             }
@@ -459,101 +549,3 @@ int main() {
     return 0;
 }
 
-
-
-//int main() {
-//
-//    // PARAMS
-//    int startBlockSize = 32;
-//    int minBlockSize = 2;
-//    int errorThreshold = 70;
-//    int numberIterations = 6;
-//    bool showOutlines = 0;
-//    int outputSize = 704;
-//    int skipFrames = 0;
-//    int maxFrames = 1248;
-//
-//    string fileName = "sintel";
-//    string fileExtension = ".y4m";
-//    VideoCapture cap("/Users/Austin/dev/fcode/" + fileName + fileExtension);
-//
-//    if (!cap.isOpened()) {
-//        std::cout << "Error opening video stream or file" << endl;
-//        return -1;
-//    }
-//
-//    vector<Mat> frames;
-//    VideoWriter video(fileName + "c.mp4", VideoWriter::fourcc('m', 'p', '4', 'v'), 24, Size(outputSize, outputSize),
-//                      false);
-//
-//    int frameCount = 0;
-//    int skippedFrames = 0;
-//    long transformationCount = 0;
-//    int blockSize = 32;
-//    float totalTime = 0;
-//    double totalSSIM = 0;
-//    double totalPSNR = 0;
-//    vector<Mat[3]> splitFrames;
-//    while (true) {
-//        Mat frame, greyFrame;
-//        while (skippedFrames < skipFrames) {
-//            cap.grab();
-//            ++skippedFrames;
-//        }
-//        if (frameCount > maxFrames && maxFrames != 0)
-//            break;
-//
-//        cap >> frame;
-//        if (frame.empty()) {
-//            break;
-//        }
-//        ++frameCount;
-//        Mat channels[3];
-//        Mat ycrcb;
-//        cvtColor(frame, ycrcb, COLOR_BGR2YCrCb);
-//        split(ycrcb, channels);
-//        frames.push_back(frame);
-//        //frames.push_back(greyFrame(Rect(0, 0, outputSize, outputSize)));
-//        if (frames.size() % 32 == 0) {
-//            cout << "Compressing block..." << endl;
-//            chrono::steady_clock::time_point begin = chrono::steady_clock::now();
-//            vector<Block> transformations = compress(frames, startBlockSize, minBlockSize, errorThreshold);
-//            chrono::steady_clock::time_point end = chrono::steady_clock::now();
-//            float seconds = (float) chrono::duration_cast<chrono::microseconds>(end - begin).count() / 1000000;
-//            totalTime += seconds;
-//            cout << "Done compressing" << endl;
-//            cout << "Transformation count: " << transformations.size() << endl;
-//            cout << "Compression ratio: "
-//                 << (outputSize * outputSize * blockSize * 8) / (float) (transformations.size() * 11) << endl
-//                 << endl;
-//            transformationCount += transformations.size();
-//            cout << "Decompressing block..." << endl;
-//            vector<Mat> decompressed = decompress(transformations,
-//                                                  blockSize,
-//                                                  outputSize,
-//                                                  numberIterations,
-//                                                  showOutlines);
-//            cout << "Done decompressing" << endl
-//                 << endl;
-//            for (int i = 0; i < decompressed.size(); ++i) {
-//                video.write(decompressed[i]);
-//                totalPSNR += getPSNR(frames[i], decompressed[i]);
-//                totalSSIM += getMSSIM(frames[i], decompressed[i])[0];
-//            }
-//            frames.clear();
-//        }
-//    }
-//    cout << "Done." << endl;
-//    cout << "Total encoding time: " << totalTime << endl;
-//    cout << "Frames encoded per second: " << frameCount / totalTime << endl;
-//    cout << "Transformation count: " << transformationCount << endl;
-//    cout << "Compression ratio: " << (outputSize * outputSize * maxFrames * 8) / (double) (transformationCount * 11)
-//         << endl;
-//    cout << "SSIM: " <<  totalSSIM/(double) frameCount << endl;
-//    cout << "PSNR: " <<  totalPSNR/(double) frameCount << endl;
-//
-//    cap.release();
-//    destroyAllWindows();
-//
-//    return 0;
-//}
