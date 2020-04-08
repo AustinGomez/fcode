@@ -4,6 +4,7 @@ venv/
 .vscode/
 __pycache__/
 *.mp4
+*.y4m
 *.pkl
 .vs/
 cmake-build*

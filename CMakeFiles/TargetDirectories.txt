@@ -1,0 +1,3 @@
+/home/austin/code/fcode/CMakeFiles/rebuild_cache.dir
+/home/austin/code/fcode/CMakeFiles/main.dir
+/home/austin/code/fcode/CMakeFiles/edit_cache.dir
