@@ -16,8 +16,7 @@ struct Block {
     int startX;
     int startY;
     int size;
-    int numFrames;
-    int error;
+    int numFrames; int error;
     int level=0;
     Scalar a;
     Scalar r;
@@ -127,6 +126,19 @@ vector<Mat> findReducedDomainBlock(const vector<Mat> &video, const Block *rangeB
         domainEndYCoordinate = domainStartYCoordinate + domainBlockSize;
     }
 
+    //vector<Mat> domainBlock;
+    //for (int i = rangeBlock->startFrame; i < rangeBlock->startFrame + rangeBlock->numFrames; ++i) {
+    //    Mat domainBlockFrame = video[i](
+    //            Rect(domainStartXCoordinate, domainStartYCoordinate, domainBlockSize, domainBlockSize));
+    //    Mat roi(rangeBlock->size, rangeBlock->size, CV_8U);
+    //    for (int j = 0; j < domainBlockFrame.size().height; j += 2) {
+    //        for (int k = 0; k < domainBlockFrame.size().width; k += 2) {
+    //            roi.at<uchar>(k / 2, j / 2) = domainBlockFrame.at<uchar>(k, j);
+    //        }
+    //    }
+    //    domainBlock.push_back(roi);
+    //}
+
     vector<Mat> domainBlock;
     for (int i = domainStartFrame; i < domainEndFrame; ++i) {
         //if (i % 2 != 0) continue;
@@ -136,12 +148,6 @@ vector<Mat> findReducedDomainBlock(const vector<Mat> &video, const Block *rangeB
         resize(roi, roi, Size(), 0.5, 0.5, INTER_NEAREST);
         domainBlock.push_back(roi);
     }
-    //vector<Mat> domainBlock;
-    //for (int i = rangeBlock->startFrame; i < rangeBlock->startFrame + rangeBlock->numFrames; ++i) {
-    //    Mat roi(rangeBlock->size, rangeBlock->size, CV_8U);
-    //    resize(video[i](Rect(domainStartXCoordinate, domainStartYCoordinate, domainBlockSize, domainBlockSize)), roi, Size(), 0.5, 0.5, INTER_NEAREST);
-    //    domainBlock.push_back(roi);
-    //}
     return domainBlock;
 }
 
@@ -151,7 +157,6 @@ vector<Mat> preprocess(const vector<Mat> &video) {
     int numFrames = video.size();
     for (int z = 0; z < numFrames; ++z) {
         Mat frame = Mat(video[0].size(), CV_8U);
-        result.push_back(frame);
         for (int i = 0; i < video[0].size().height; ++i) {
             for (int j = 0; j < video[0].size().width; ++j) {
                 int sum = 0;
@@ -181,9 +186,10 @@ vector<Mat> preprocess(const vector<Mat> &video) {
                     ++count;
                 }
 
-                result[z].at<uchar>(i, j) = sum / count;
+                frame.at<uchar>(i, j) = sum / count;
             }
         }
+        result.push_back(frame);
     }
     return result;
 }
@@ -428,12 +434,11 @@ vector<Mat> decompress(const vector<Block *> &topRangeBlocks, const int numFrame
     return iterations.back();
 }
 
-vector<Mat> generateVideo(const vector<Mat> &frames, const int &writeSize) {
+vector<Mat> generateVideo(const vector<Mat> &frames, const int &writeSize, const int &errorThreshold=0) {
     // PARAMS
     int startBlockSize = 32;
     int minBlockSize = 2;
-    int errorThreshold = 10;
-    int numberIterations = 9;
+    int numberIterations = 6;
     bool showOutlines = false;
     int blockSize = 32;
     cout << "Compressing block..." << endl;
@@ -491,7 +496,7 @@ int main() {
         }
 
         ++frameCount;
-        Rect roi(200, 0, outputSize, outputSize);
+        Rect roi(500, 0, outputSize, outputSize);
         frames.push_back(frame(roi));
         Mat channels[3];
         Mat ycrcb;
@@ -500,8 +505,8 @@ int main() {
 
         // Reduce the size of the non-luminance channels by 4, rounded to the nearest multiple of blockSize;
         //resize(channels[0], channels[0], Size(), 0.5, 0.5);
-        resize(channels[1], channels[1], Size(), 0.25, 0.25);
-        resize(channels[2], channels[2], Size(), 0.25, 0.25);
+        //resize(channels[1], channels[1], Size(), 0.5, 0.5);
+        //resize(channels[2], channels[2], Size(), 0.5, 0.5);
 
         channel0.push_back(channels[0]);
         channel1.push_back(channels[1]);
@@ -512,9 +517,9 @@ int main() {
             vector<Mat> decompressedChannel0;
             vector<Mat> decompressedChannel1;
             vector<Mat> decompressedChannel2;
-            decompressedChannel0 = generateVideo(channel0, writeSize);
-            decompressedChannel1 = generateVideo(channel1, writeSize);
-            decompressedChannel2 = generateVideo(channel2, writeSize);
+            decompressedChannel0 = generateVideo(channel0, writeSize, 30);
+            decompressedChannel1 = generateVideo(channel1, writeSize, 50);
+            decompressedChannel2 = generateVideo(channel2, writeSize, 50);
             vector<Mat> newVideo;
             for (int i = 0; i < decompressedChannel0.size(); ++i) {
                 vector<Mat> newChannels;
