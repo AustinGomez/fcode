@@ -2,9 +2,11 @@ venv/
 .idea/
 .DS_store
 .vscode/
+build/
 __pycache__/
 *.pdf
 *.mp4
+*.y4m
 *.pkl
 *.MOV
 .vs/

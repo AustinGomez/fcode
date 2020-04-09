@@ -128,13 +128,12 @@ vector<Mat> findReducedDomainBlock(const vector<Mat> &video, const Block *rangeB
     }
 
     vector<Mat> domainBlock;
-    for (int i = rangeBlock->startFrame; i < rangeBlock->startFrame + rangeBlock->numFrames; ++i) {
-        Mat roi(rangeBlock->size, rangeBlock->size, CV_8U);
-        for (int j = 0; j < domainBlockSize; j += 2) {
-            for (int k = 0; k < domainBlockSize; k += 2) {
-                roi.at<uchar>(k / 2, j / 2) = video[i].at<uchar>(k + domainStartYCoordinate, j + domainStartXCoordinate);
-            }
-        }
+    for (int i = domainStartFrame; i < domainEndFrame; ++i) {
+        //if (i % 2 != 0) continue;
+        Mat domainBlockFrame = video[i];
+        Mat roi = domainBlockFrame(
+                Rect(domainStartXCoordinate, domainStartYCoordinate, domainBlockSize, domainBlockSize));
+        resize(roi, roi, Size(), 0.5, 0.5, INTER_NEAREST);
         domainBlock.push_back(roi);
     }
     //vector<Mat> domainBlock;
@@ -157,6 +156,14 @@ vector<Mat> preprocess(const vector<Mat> &video) {
             for (int j = 0; j < video[0].size().width; ++j) {
                 int sum = 0;
                 int count = 0;
+                if (z > 0) {
+                    sum += video[z-1].at<uchar>(i, j);
+                    ++count;
+                }
+                if (z < numFrames - 1) {
+                    sum += video[z+1].at<uchar>(i, j);
+                    ++count;
+                }
                 if (i > 0) {
                     sum += video[z].at<uchar>(i - 1, j);
                     ++count;
@@ -243,32 +250,33 @@ findParamsAndError(const vector<Mat> &rangeBlock, const vector<Mat> &domainBlock
     int bestA = -5;
     r = getVideoAverage(rangeBlock);
     Scalar d_mean = getVideoAverage(domainBlock);
+    //cout << d_mean << " " << r << endl;
     a = 0.5;
     float maxFrameError = INT_MIN;
-    for (float trialA = -1; trialA <= 1; trialA += 0.125) {
+    for (float trialA = -1; trialA <= 1; trialA += 0.25) {
         error = 0;
         maxFrameError = 0;
-        float count = 0;
         for (int z = 0; z < domainBlock.size(); ++z) {
+            //float frameError = pow(norm((domainBlock[z] - d_mean) * trialA + r, rangeBlock[z]), 2);
             float frameError = 0;
             for (int i = 0; i < domainBlock[z].size().height; ++i) {
-                for (int j = 0; j < domainBlock[z].size().height; ++j) {
-                    ++count;
+               for (int j = 0; j < domainBlock[z].size().height; ++j) {
                     frameError += pow(((domainBlock[z].at<uchar>(i, j) - d_mean.val[0]) * trialA) -
-                                      (rangeBlock[z].at<uchar>(i, j) - r.val[0]),
-                                      2);
+                                         (rangeBlock[z].at<uchar>(i, j) - r.val[0]),
+                                         2);
                 }
             }
             error += frameError;
             if (frameError > maxFrameError) maxFrameError = frameError;
-            //if (frameError > minError) break;
         }
-        if (maxFrameError < minError) {
-            minError = maxFrameError;
+        //error = error / rangeBlock.size();
+        if (error < minError) {
+            minError = error;
             a = trialA;
         }
     }
-    return maxFrameError;
+    //cout << "Threshold: " << errorThreshold << " maxFrame " << maxFrameError << " a: " << a << " size " << rangeBlock.size() << endl;
+    return minError;
 }
 
 vector<Block *>
@@ -424,7 +432,7 @@ vector<Mat> generateVideo(const vector<Mat> &frames, const int &writeSize) {
     // PARAMS
     int startBlockSize = 32;
     int minBlockSize = 2;
-    int errorThreshold = 20;
+    int errorThreshold = 10;
     int numberIterations = 9;
     bool showOutlines = false;
     int blockSize = 32;
@@ -443,12 +451,12 @@ vector<Mat> generateVideo(const vector<Mat> &frames, const int &writeSize) {
 int main() {
     int outputSize = 512;
     int writeSize = outputSize;
-    int skipFrames = 0;
+    int skipFrames = 1234;
     int maxFrames = 32;
 
-    string fileName = "boat";
-    string fileExtension = ".mp4";
-    VideoCapture cap("/Users/Austin/dev/fcode/" + fileName + fileExtension);
+    string fileName = "bunny";
+    string fileExtension = ".y4m";
+    VideoCapture cap(fileName + fileExtension);
 
     if (!cap.isOpened()) {
         std::cout << "Error opening video stream or file" << endl;
@@ -483,7 +491,7 @@ int main() {
         }
 
         ++frameCount;
-        Rect roi(0, 500, outputSize, outputSize);
+        Rect roi(200, 0, outputSize, outputSize);
         frames.push_back(frame(roi));
         Mat channels[3];
         Mat ycrcb;
