@@ -259,7 +259,7 @@ findParamsAndError(const vector<Mat> &rangeBlock, const vector<Mat> &domainBlock
     //cout << d_mean << " " << r << endl;
     a = 0.5;
     float maxFrameError = INT_MIN;
-    for (float trialA = -1; trialA <= 1; trialA += 0.25) {
+    for (float trialA = -1; trialA <= 1; trialA += 0.125) {
         error = 0;
         maxFrameError = 0;
         for (int z = 0; z < domainBlock.size(); ++z) {
@@ -456,7 +456,7 @@ vector<Mat> generateVideo(const vector<Mat> &frames, const int &writeSize, const
 int main() {
     int outputSize = 512;
     int writeSize = outputSize;
-    int skipFrames = 1234;
+    int skipFrames = 360;
     int maxFrames = 32;
 
     string fileName = "bunny";
@@ -505,8 +505,8 @@ int main() {
 
         // Reduce the size of the non-luminance channels by 4, rounded to the nearest multiple of blockSize;
         //resize(channels[0], channels[0], Size(), 0.5, 0.5);
-        //resize(channels[1], channels[1], Size(), 0.5, 0.5);
-        //resize(channels[2], channels[2], Size(), 0.5, 0.5);
+        resize(channels[1], channels[1], Size(), 0.5, 0.5);
+        resize(channels[2], channels[2], Size(), 0.5, 0.5);
 
         channel0.push_back(channels[0]);
         channel1.push_back(channels[1]);
@@ -518,11 +518,12 @@ int main() {
             vector<Mat> decompressedChannel1;
             vector<Mat> decompressedChannel2;
             decompressedChannel0 = generateVideo(channel0, writeSize, 30);
-            decompressedChannel1 = generateVideo(channel1, writeSize, 50);
-            decompressedChannel2 = generateVideo(channel2, writeSize, 50);
+            decompressedChannel1 = generateVideo(channel1, writeSize, 30);
+            decompressedChannel2 = generateVideo(channel2, writeSize, 30);
             vector<Mat> newVideo;
             for (int i = 0; i < decompressedChannel0.size(); ++i) {
                 vector<Mat> newChannels;
+                cout << decompressedChannel0[i].type() <<endl;
                 newChannels.push_back(decompressedChannel0[i]);
                 newChannels.push_back(decompressedChannel1[i]);
                 newChannels.push_back(decompressedChannel2[i]);
@@ -532,9 +533,15 @@ int main() {
                 newVideo.push_back(newFrame);
             }
             for (int i = 0; i < newVideo.size(); ++i) {
+                //Mat filtered;
+                //bilateralFilter(newVideo[i], filtered, 3, 20, 20);
                 video.write(newVideo[i]);
-                totalPSNR += getPSNR(frames[i], newVideo[i]);
-                totalSSIM += getMSSIM(frames[i], newVideo[i])[0];
+                Mat compressedG;
+                Mat videoG;
+                cvtColor(newVideo[i], compressedG, COLOR_BGR2GRAY);
+                cvtColor(frames[i], videoG, COLOR_BGR2GRAY);
+                totalPSNR += getPSNR(compressedG, videoG);
+                totalSSIM += getMSSIM(compressedG, videoG)[0];
             }
             frames.clear();
             newVideo.clear();

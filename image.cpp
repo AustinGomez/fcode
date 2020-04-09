@@ -39,7 +39,7 @@ float findParamsAndError(const Mat &rangeBlock, const Mat &domainBlock, const in
     //Mat D22 = domainBlock(Rect(0, rangeBlock.size().width / 2, domainBlock.size().width, domainBlock.size().height / 2)) - d_mean;
     //Mat R22 = rangeBlock(Rect(0, rangeBlock.size().width / 2, rangeBlock.size().width, rangeBlock.size().width / 2)) - r;
 
-    for (int trialA = -8; trialA < 9; ++trialA)
+    for (int trialA = -8; trialA <= 8; ++trialA)
     {
         float scaledA = trialA * 0.125;
         //double norm1 = norm(scaledA * D21, R21);
@@ -137,7 +137,7 @@ vector<Block> compress(const Mat &image, const int startRangeSize, const int min
         Mat rangeBlockImage = image(Rect(rangeBlock.startX, rangeBlock.startY, rangeBlock.size, rangeBlock.size));
         Mat domainBlockImage = findReducedDomainBlock(processedImage, rangeBlock);
         int level = (int)log2(startRangeSize / rangeBlock.size);
-        int newErrorThreshold = (pow(2, level)) * errorThreshold + (pow(2, level)) - 1;
+        int newErrorThreshold = errorThreshold;//(pow(2, level)) * errorThreshold + (pow(2, level)) - 1;
         Scalar a;
         Scalar r;
         float error = findParamsAndError(rangeBlockImage, domainBlockImage, newErrorThreshold, a, r);
@@ -208,7 +208,8 @@ double getPSNR(const Mat &I1, const Mat &I2)
 
 int main()
 {
-    Mat image = imread("lena512.bmp", IMREAD_GRAYSCALE);
+    Mat image = imread("ss.png", IMREAD_GRAYSCALE);
+    image = image(Rect(100,200, 512,512));
 
     if (!image.data)
     {
@@ -216,7 +217,7 @@ int main()
         return -1;
     }
     chrono::steady_clock::time_point begin = chrono::steady_clock::now();
-    vector<Block> transformations = compress(image, 16, 2, 39);
+    vector<Block> transformations = compress(image, 16, 2, 30);
     chrono::steady_clock::time_point end = chrono::steady_clock::now();
     cout << "Time difference = " << (float)chrono::duration_cast<chrono::microseconds>(end - begin).count() / 1000000 << "s" << endl;
     Mat decompressed = decompress(transformations, 512, 15);
