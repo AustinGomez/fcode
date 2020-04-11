@@ -1,6 +1,6 @@
 CC = g++
 CFLAGS = -Wall -w
-SRCS = videoChunked.cpp
+SRCS = image.cpp
 PROG = build/main
 
 OPENCV = `pkg-config opencv --cflags --libs`

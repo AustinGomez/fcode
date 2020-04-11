@@ -208,8 +208,8 @@ double getPSNR(const Mat &I1, const Mat &I2)
 
 int main()
 {
-    Mat image = imread("ss.png", IMREAD_GRAYSCALE);
-    image = image(Rect(100,200, 512,512));
+    Mat image = imread("ss2.png", IMREAD_GRAYSCALE);
+    image = image(Rect(300, 300, 512, 512));
 
     if (!image.data)
     {
@@ -217,7 +217,7 @@ int main()
         return -1;
     }
     chrono::steady_clock::time_point begin = chrono::steady_clock::now();
-    vector<Block> transformations = compress(image, 16, 2, 30);
+    vector<Block> transformations = compress(image, 16, 2, 20);
     chrono::steady_clock::time_point end = chrono::steady_clock::now();
     cout << "Time difference = " << (float)chrono::duration_cast<chrono::microseconds>(end - begin).count() / 1000000 << "s" << endl;
     Mat decompressed = decompress(transformations, 512, 15);
