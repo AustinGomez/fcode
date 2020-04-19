@@ -259,12 +259,13 @@ findParamsAndError(const vector<Mat> &rangeBlock, const vector<Mat> &domainBlock
     //cout << d_mean << " " << r << endl;
     a = 0.5;
     float maxFrameError = INT_MIN;
-    for (float trialA = -1; trialA <= 1; trialA += 0.125) {
+    for (float trialA = -0.5; trialA <= 0.5; trialA += 0.25) {
         error = 0;
         maxFrameError = 0;
         for (int z = 0; z < domainBlock.size(); ++z) {
-            //float frameError = pow(norm((domainBlock[z] - d_mean) * trialA + r, rangeBlock[z]), 2);
             float frameError = 0;
+            //Mat trialBlock = (domainBlock[z] - d_mean) * trialA - (rangeBlock[z] - r);
+            //frameError = pow(norm(trialBlock), 2);
             for (int i = 0; i < domainBlock[z].size().height; ++i) {
                for (int j = 0; j < domainBlock[z].size().height; ++j) {
                     frameError += pow(((domainBlock[z].at<uchar>(i, j) - d_mean.val[0]) * trialA) -
@@ -346,7 +347,7 @@ void drawPartitions(Mat &block) {
     }
 }
 
-vector<Mat> decompress(const vector<Block *> &topRangeBlocks, const int numFrames, const int outputSize,
+vector<Mat> decompress(const vector<Block *> &topRangeBlocks, const int numFrames, const int outputSize, long &transformationCount,
                        const int numberIterations = 8, bool showOutlines = false, const int maxDepth=4) {
     vector<vector<Mat>> iterations;
     vector<Mat> currentVideo;
@@ -400,6 +401,7 @@ vector<Mat> decompress(const vector<Block *> &topRangeBlocks, const int numFrame
         }
     }
     cout << rangeBlocks.size() << endl;
+    transformationCount += rangeBlocks.size();
     for (int i = 0; i < numberIterations; ++i) {
         vector<Mat> processedVideo = preprocess(iterations.back());
         int counter = 0;
@@ -422,7 +424,10 @@ vector<Mat> decompress(const vector<Block *> &topRangeBlocks, const int numFrame
                         }
                     }
                 }
+                //cout << "here" << endl;
                 //if (showOutlines && i == numberIterations - 1) drawPartitions(domainBlock[z]);
+
+                //cout << rangeBlock->startX << " " << rangeBlock->startY << " " << rangeBlock->size << endl;
                 domainBlock[z].copyTo(currentVideo[z + rangeBlock->startFrame](
                         Rect(rangeBlock->startX, rangeBlock->startY, rangeBlock->size, rangeBlock->size)));
             }
@@ -434,29 +439,37 @@ vector<Mat> decompress(const vector<Block *> &topRangeBlocks, const int numFrame
     return iterations.back();
 }
 
-vector<Mat> generateVideo(const vector<Mat> &frames, const int &writeSize, const int &errorThreshold=0) {
+vector<Mat> generateVideo(const vector<Mat> &frames, const int &writeSize, long &transformationCount, float &totalTime, const int &errorThreshold=0) {
     // PARAMS
     int startBlockSize = 32;
     int minBlockSize = 2;
-    int numberIterations = 6;
+    int numberIterations = 3;
     bool showOutlines = false;
     int blockSize = 32;
     cout << "Compressing block..." << endl;
+    chrono::steady_clock::time_point begin = chrono::steady_clock::now();
     vector<Block *> transformations = compress(frames, startBlockSize, minBlockSize, errorThreshold);
+    chrono::steady_clock::time_point end = chrono::steady_clock::now();
+    totalTime += (float)chrono::duration_cast<chrono::microseconds>(end - begin).count() / 1000000;
+    transformationCount += transformations.size();
     cout << "Done compressing" << endl;
     cout << "Decompressing block..." << endl;
     vector<Mat> decompressed = decompress(transformations,
                                           blockSize,
                                           writeSize,
+                                          transformationCount,
                                           numberIterations,
-                                          showOutlines);
+                                          showOutlines
+                                          );
+
     return decompressed;
 }
 
 int main() {
+    // Need to make this work for non-square, power of 2 images.
     int outputSize = 512;
     int writeSize = outputSize;
-    int skipFrames = 360;
+    int skipFrames = 4567;
     int maxFrames = 32;
 
     string fileName = "bunny";
@@ -481,6 +494,7 @@ int main() {
     float totalTime = 0;
     double totalSSIM = 0;
     double totalPSNR = 0;
+    int writtenFrames = 0;
     while (true) {
         Mat frame, greyFrame;
         while (skippedFrames < skipFrames) {
@@ -496,17 +510,15 @@ int main() {
         }
 
         ++frameCount;
-        Rect roi(500, 0, outputSize, outputSize);
+        Rect roi(374, 104, outputSize, outputSize);
         frames.push_back(frame(roi));
         Mat channels[3];
         Mat ycrcb;
         cvtColor(frame(roi), ycrcb, COLOR_BGR2YCrCb);
         split(ycrcb, channels);
 
-        // Reduce the size of the non-luminance channels by 4, rounded to the nearest multiple of blockSize;
-        //resize(channels[0], channels[0], Size(), 0.5, 0.5);
-        resize(channels[1], channels[1], Size(), 0.5, 0.5);
-        resize(channels[2], channels[2], Size(), 0.5, 0.5);
+        resize(channels[1], channels[1], Size(), 0.25, 0.25);
+        resize(channels[2], channels[2], Size(), 0.25, 0.25);
 
         channel0.push_back(channels[0]);
         channel1.push_back(channels[1]);
@@ -517,13 +529,12 @@ int main() {
             vector<Mat> decompressedChannel0;
             vector<Mat> decompressedChannel1;
             vector<Mat> decompressedChannel2;
-            decompressedChannel0 = generateVideo(channel0, writeSize, 30);
-            decompressedChannel1 = generateVideo(channel1, writeSize, 30);
-            decompressedChannel2 = generateVideo(channel2, writeSize, 30);
+            decompressedChannel0 = generateVideo(channel0, writeSize, transformationCount, totalTime, 30);
+            decompressedChannel1 = generateVideo(channel1, writeSize, transformationCount, totalTime, 30);
+            decompressedChannel2 = generateVideo(channel2, writeSize, transformationCount, totalTime, 30);
             vector<Mat> newVideo;
             for (int i = 0; i < decompressedChannel0.size(); ++i) {
                 vector<Mat> newChannels;
-                cout << decompressedChannel0[i].type() <<endl;
                 newChannels.push_back(decompressedChannel0[i]);
                 newChannels.push_back(decompressedChannel1[i]);
                 newChannels.push_back(decompressedChannel2[i]);
@@ -532,16 +543,29 @@ int main() {
                 cvtColor(newFrame, newFrame, COLOR_YCrCb2BGR);
                 newVideo.push_back(newFrame);
             }
-            for (int i = 0; i < newVideo.size(); ++i) {
-                //Mat filtered;
-                //bilateralFilter(newVideo[i], filtered, 3, 20, 20);
-                video.write(newVideo[i]);
+            for (int i = 0; i < maxFrames; ++i) {
                 Mat compressedG;
                 Mat videoG;
-                cvtColor(newVideo[i], compressedG, COLOR_BGR2GRAY);
-                cvtColor(frames[i], videoG, COLOR_BGR2GRAY);
-                totalPSNR += getPSNR(compressedG, videoG);
-                totalSSIM += getMSSIM(compressedG, videoG)[0];
+                //cvtColor(newVideo[i], compressedG, COLOR_BGR2GRAY);
+                //cvtColor(frames[i], videoG, COLOR_BGR2GRAY);
+                //double psnr = getPSNR(compressedG, videoG);
+                //double ssim = getMSSIM(compressedG, videoG)[0];
+                double psnr = getPSNR(newVideo[i], frames[i]);
+                double ssim = getMSSIM(newVideo[i], frames[i])[0];
+
+                totalPSNR += psnr;
+                totalSSIM += ssim;
+
+                putText(newVideo[i],
+                        std::to_string(ssim),
+                        cv::Point(10, newVideo[i].rows / 2),
+                        cv::FONT_HERSHEY_DUPLEX,
+                        1.0,
+                        CV_RGB(0, 0, 0),
+                        2);
+
+                video.write(newVideo[i]);
+                writtenFrames += 1;
             }
             frames.clear();
             newVideo.clear();
@@ -549,12 +573,12 @@ int main() {
     }
     cout << "Done." << endl;
     cout << "Total encoding time: " << totalTime << endl;
-    cout << "Frames encoded per second: " << frameCount / totalTime << endl;
+    cout << "Frames encoded per second: " << maxFrames / totalTime << endl;
     cout << "Transformation count: " << transformationCount << endl;
-    cout << "Compression ratio: " << (outputSize * outputSize * maxFrames * 8) / (double) (transformationCount * 11)
+    cout << "Compression ratio: " << (outputSize * outputSize * maxFrames * 24) / (double) (transformationCount * 9)
          << endl;
-    cout << "SSIM: " <<  totalSSIM/(double) frameCount << endl;
-    cout << "PSNR: " <<  totalPSNR/(double) frameCount << endl;
+    cout << "SSIM: " <<  totalSSIM/(double) maxFrames  << endl;
+    cout << "PSNR: " <<  totalPSNR/(double) maxFrames  << endl;
 
     cap.release();
     destroyAllWindows();
