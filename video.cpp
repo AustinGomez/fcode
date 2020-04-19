@@ -48,34 +48,33 @@ findParamsAndError(const vector<Mat> &rangeBlock, const vector<Mat> &domainBlock
     //cout << d_mean << " " << r << endl;
     a = 0.5;
     float maxFrameError = INT_MIN;
-    for (float trialA = -1; trialA <= 1; trialA += 0.125) {
+    for (float trialA = 0; trialA <= 1; trialA += 0.25) {
         error = 0;
         maxFrameError = 0;
         float count = 0;
+
         for (int z = 0; z < domainBlock.size(); ++z) {
-//            float frameError = pow(norm((domainBlock[z] - d_mean) * trialA + r, rangeBlock[z]), 2);
             float frameError = 0;
             for (int i = 0; i < domainBlock[z].size().height; ++i) {
-                for (int j = 0; j < domainBlock[z].size().height; ++j) {
-                    ++count;
-                    frameError += pow(((domainBlock[z].at<uchar>(i, j) - d_mean.val[0]) * trialA) -
-                                      (rangeBlock[z].at<uchar>(i, j) - r.val[0]),
-                                      2);
+               const uchar* dPixel = domainBlock[z].ptr(i);
+               const uchar* rPixel = rangeBlock[z].ptr(i);
+               for (int j = 0; j < domainBlock[z].size().height; ++j) {
+                   error += pow(((dPixel[j] - d_mean.val[0]) * trialA) -
+                           (rPixel[j]- r.val[0]),
+                           2);
                 }
             }
-            error += frameError;
-            if (frameError > maxFrameError) maxFrameError = frameError;
         }
         //error = error / count;
         //error = sqrt(error);
         //cout << error << endl;
-        if (maxFrameError < minError) {
-            minError = maxFrameError;
+        if (minError< minError) {
+            minError = minError;
             a = trialA;
         }
     }
     //cout << "Threshold: " << errorThreshold << " maxFrame " << maxFrameError << " a: " << a << endl;
-    return maxFrameError;
+    return minError;
 }
 
 // In this case, image is already reduced.
@@ -146,20 +145,12 @@ vector<Mat> preprocess(const vector<Mat> &video) {
             for (int j = 0; j < video[0].size().width; ++j) {
                 int sum = 0;
                 int count = 0;
-                if (z > 0) {
-                    sum += video[z - 1].at<uchar>(i, j);
-                    ++count;
-                }
                 if (i > 0) {
                     sum += video[z].at<uchar>(i - 1, j);
                     ++count;
                 }
                 if (j > 0) {
                     sum += video[z].at<uchar>(i, j - 1);
-                    ++count;
-                }
-                if (z < numFrames - 1) {
-                    sum += video[z + 1].at<uchar>(i, j);
                     ++count;
                 }
                 if (i < video[0].size().height - 1) {
@@ -217,7 +208,7 @@ compress(const vector<Mat> &video, const int startRangeSize, const int minRangeS
         if (rangeBlock.size == minRangeSize)
             newErrorThreshold = INT_MAX;
         else
-            newErrorThreshold = (pow(2, level)) * errorThreshold + (pow(2, level)) - 1;
+            newErrorThreshold = errorThreshold; //(pow(2, level)) * errorThreshold + (pow(2, level)) - 1;
         Scalar a;
         Scalar r;
 
@@ -306,9 +297,9 @@ vector<Mat> decompress(const vector<Block> &transformations, const int numFrames
 }
 
 int main() {
-    string fileName = "sintel";
+    string fileName = "bunny";
     string fileExtension = ".y4m";
-    VideoCapture cap("/Users/Austin/dev/fcode/" + fileName + fileExtension);
+    VideoCapture cap(fileName + fileExtension);
 
     if (!cap.isOpened()) {
         std::cout << "Error opening video stream or file" << endl;
@@ -317,7 +308,7 @@ int main() {
 
     vector<Mat> frames;
     int frameCount = 0;
-    int skipFrames = 600;
+    int skipFrames = 1234;
     int skippedFrames = 0;
     int maxFrames = 32;
     int outputSize = 720;
@@ -341,7 +332,7 @@ int main() {
     cout << "Done in " << (float) chrono::duration_cast<chrono::microseconds>(end - begin).count() / 1000000
          << "seconds" << endl;
     begin = chrono::steady_clock::now();
-    vector<Mat> decompressed = decompress(transformations, frameCount, outputSize, 10);
+    vector<Mat> decompressed = decompress(transformations, frameCount, outputSize, 5);
     end = chrono::steady_clock::now();
     cout << "Done in " << (float) chrono::duration_cast<chrono::microseconds>(end - begin).count() / 1000000
          << "seconds" << endl;
