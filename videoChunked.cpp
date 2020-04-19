@@ -153,11 +153,11 @@ vector<Mat> findReducedDomainBlock(const vector<Mat> &video, const Block *rangeB
 
 vector<Mat> preprocess(const vector<Mat> &video) {
     vector<Mat> result;
-
     int numFrames = video.size();
     for (int z = 0; z < numFrames; ++z) {
         Mat frame = Mat(video[0].size(), CV_8U);
         for (int i = 0; i < video[0].size().height; ++i) {
+            uchar* pixel = frame.ptr(i);
             for (int j = 0; j < video[0].size().width; ++j) {
                 int sum = 0;
                 int count = 0;
@@ -186,7 +186,7 @@ vector<Mat> preprocess(const vector<Mat> &video) {
                     ++count;
                 }
 
-                frame.at<uchar>(i, j) = sum / count;
+                pixel[j]  = sum / count;
             }
         }
         result.push_back(frame);
@@ -259,7 +259,7 @@ findParamsAndError(const vector<Mat> &rangeBlock, const vector<Mat> &domainBlock
     //cout << d_mean << " " << r << endl;
     a = 0.5;
     float maxFrameError = INT_MIN;
-    for (float trialA = -0.5; trialA <= 0.5; trialA += 0.25) {
+    for (float trialA = 0.5; trialA <= 0.5; trialA += 0.25) {
         error = 0;
         maxFrameError = 0;
         for (int z = 0; z < domainBlock.size(); ++z) {
@@ -267,10 +267,12 @@ findParamsAndError(const vector<Mat> &rangeBlock, const vector<Mat> &domainBlock
             //Mat trialBlock = (domainBlock[z] - d_mean) * trialA - (rangeBlock[z] - r);
             //frameError = pow(norm(trialBlock), 2);
             for (int i = 0; i < domainBlock[z].size().height; ++i) {
+               const uchar* dPixel = domainBlock[z].ptr(i);
+               const uchar* rPixel = rangeBlock[z].ptr(i);
                for (int j = 0; j < domainBlock[z].size().height; ++j) {
-                    frameError += pow(((domainBlock[z].at<uchar>(i, j) - d_mean.val[0]) * trialA) -
-                                         (rangeBlock[z].at<uchar>(i, j) - r.val[0]),
-                                         2);
+                   frameError += pow(((dPixel[j] - d_mean.val[0]) * trialA) -
+                           (rPixel[j]- r.val[0]),
+                           2);
                 }
             }
             error += frameError;
@@ -410,7 +412,6 @@ vector<Mat> decompress(const vector<Block *> &topRangeBlocks, const int numFrame
             vector<Mat> domainBlock = findReducedDomainBlock(processedVideo, rangeBlock);
             Scalar average = getVideoAverage(domainBlock);
             for (int z = 0; z < rangeBlock->numFrames; z++) {
-                //domainBlock[z].convertTo(domainBlock[z], CV_32F);
                 domainBlock[z] = (domainBlock[z] - average) * rangeBlock->a.val[0] + rangeBlock->r.val[0];
                 // Show outlines
                 //showOutlines = rangeBlocks.size() > 800000;
@@ -443,7 +444,7 @@ vector<Mat> generateVideo(const vector<Mat> &frames, const int &writeSize, long 
     // PARAMS
     int startBlockSize = 32;
     int minBlockSize = 2;
-    int numberIterations = 3;
+    int numberIterations = 5;
     bool showOutlines = false;
     int blockSize = 32;
     cout << "Compressing block..." << endl;
