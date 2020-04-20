@@ -16,11 +16,13 @@ struct Block {
     int startX;
     int startY;
     int size;
-    int numFrames; int error;
+    int numFrames;
     int level=0;
+    Block *parent;
     bool split = false;
     Scalar a;
     Scalar r;
+    float error;
     vector<Block *> children;
     bool hasChildren = false;
 
@@ -31,6 +33,14 @@ struct Block {
             size{size},
             numFrames{ numFrames == 0 ? size : numFrames},
             level{level} {};
+};
+
+struct BlockComp
+{
+    bool operator () ( const Block* a, const Block* b ) const
+    {
+        return a->error < b->error;
+    }
 };
 
 Scalar getMSSIM( const Mat& i1, const Mat& i2)
@@ -149,14 +159,14 @@ vector<Mat> preprocess(const vector<Mat> &video) {
             for (int j = 0; j < video[0].size().width; ++j) {
                 int sum = 0;
                 int count = 0;
-                //if (z > 0) {
-                //    sum += video[z-1].at<uchar>(i, j);
-                //    ++count;
-                //}
-                //if (z < numFrames - 1) {
-                //    sum += video[z+1].at<uchar>(i, j);
-                //    ++count;
-                //}
+                if (z > 0) {
+                    sum += video[z-1].at<uchar>(i, j);
+                    ++count;
+                }
+                if (z < numFrames - 1) {
+                    sum += video[z+1].at<uchar>(i, j);
+                    ++count;
+                }
                 if (i > 0) {
                     sum += video[z].at<uchar>(i - 1, j);
                     ++count;
@@ -197,7 +207,7 @@ Scalar getVideoAverage(const vector<Mat> &video) {
 void octTreeDown(Block *block, queue<Block *> &blockQueue, const int maxDepth) {
     block->hasChildren = true;
     int newLevel = block->level + 1;
-    if (block->level < maxDepth - 1) {
+    if (block->level < maxDepth) {
         int newRangeSize = block->size / 2;
         int newNumFrames = newRangeSize;
         Block *q1 = new Block(block->startFrame, block->startX, block->startY, newRangeSize, newNumFrames, newLevel);
@@ -227,29 +237,12 @@ void octTreeDown(Block *block, queue<Block *> &blockQueue, const int maxDepth) {
         block->children.push_back(q6);
         block->children.push_back(q7);
         block->children.push_back(q8);
-    } else if (block->level == maxDepth -1) {
+    } else {
         for (int i = 0; i < block->numFrames; ++i) {
             Block * newChild = new Block(block->startFrame + i, block->startX, block->startY, block->size, 1, newLevel);
             blockQueue.push(newChild);
             block->children.push_back(newChild);
         }
-    } else {
-        int newNumFrames = 1;
-        int newRangeSize = 1;
-        Block *q1 = new Block(block->startFrame, block->startX, block->startY, newRangeSize, newNumFrames, newLevel);
-        Block *q2 = new Block(block->startFrame, block->startX + newRangeSize, block->startY, newRangeSize, newNumFrames, newLevel);
-        Block *q3 = new Block(block->startFrame, block->startX, block->startY + newRangeSize, newRangeSize, newNumFrames, newLevel);
-        Block *q4 = new Block(block->startFrame, block->startX + newRangeSize, block->startY + newRangeSize, newRangeSize, newNumFrames, newLevel);
-
-        blockQueue.push(q1);
-        blockQueue.push(q2);
-        blockQueue.push(q3);
-        blockQueue.push(q4);
-
-        block->children.push_back(q1);
-        block->children.push_back(q2);
-        block->children.push_back(q3);
-        block->children.push_back(q4);
     }
 }
 
@@ -293,51 +286,72 @@ findParamsAndError(const vector<Mat> &rangeBlock, const vector<Mat> &domainBlock
 
 
 vector<Block *>
-compress(const vector<Mat> &video, const int startRangeSize, const int minRangeSize, const int errorThreshold) {
+compress(const vector<Mat> &video, const int startRangeSize, const int minRangeSize, const int errorThreshold, const float &minCompressionRatio) {
+    long maxNumberOfTransformations = (video.size() * video[0].size().height * video[0].size().width * 8) / (minCompressionRatio * 10);
+    cout << "Max: " << maxNumberOfTransformations << endl;
     vector<Block> transformations;
     int numFrames = video.size();
     int width = video[0].size().width;
     int height = video[0].size().height;
 
-    queue<Block *> uncoveredRangeBlocks;
+    priority_queue<Block *, vector<Block *>, BlockComp> uncoveredRangeBlocks;
+    queue<Block *> rangeBlocksWithoutComputedError;
     vector<Block *> topRangeBlocks;
     for (int z = 0; z < numFrames; z += startRangeSize) {
         for (int i = 0; i < height; i += startRangeSize) {
             for (int j = 0; j < width; j += startRangeSize) {
                 Block *rangeBlock = new Block(z, j, i, startRangeSize, startRangeSize, 0);
-                uncoveredRangeBlocks.push(rangeBlock);
+                rangeBlocksWithoutComputedError.push(rangeBlock);
                 topRangeBlocks.push_back(rangeBlock);
             }
         }
     }
     vector<Mat> processedVideo = preprocess(video);
-    while (!uncoveredRangeBlocks.empty()) {
-        Block *rangeBlock = uncoveredRangeBlocks.front();
-        uncoveredRangeBlocks.pop();
+    long numberTransformations = 0;
+    long total = 0;
+    while (!(uncoveredRangeBlocks.empty() && rangeBlocksWithoutComputedError.empty()) && numberTransformations < maxNumberOfTransformations) {
+        //cout << numberTransformations << endl;
+        while (!rangeBlocksWithoutComputedError.empty()) {
+            //cout << "Here 1 " << rangeBlocksWithoutComputedError.size() <<  endl;
+            //cout << numberTransformations << endl;
+            Block *rangeBlock = rangeBlocksWithoutComputedError.front();
+            rangeBlocksWithoutComputedError.pop();
 
-        vector<Mat> rangeBlockVideo;
-        for (int i = rangeBlock->startFrame; i < rangeBlock->startFrame + rangeBlock->numFrames; ++i) {
-            Mat rangeBlockFrame = video[i];
-            Mat roi = rangeBlockFrame(Rect(rangeBlock->startX, rangeBlock->startY, rangeBlock->size, rangeBlock->size));
-            rangeBlockVideo.push_back(roi);
+            vector<Mat> rangeBlockVideo;
+            for (int i = rangeBlock->startFrame; i < rangeBlock->startFrame + rangeBlock->numFrames; ++i) {
+                Mat rangeBlockFrame = video[i];
+                Mat roi = rangeBlockFrame(Rect(rangeBlock->startX, rangeBlock->startY, rangeBlock->size, rangeBlock->size));
+                rangeBlockVideo.push_back(roi);
+            }
+
+            vector<Mat> domainBlockVideo = findReducedDomainBlock(processedVideo, rangeBlock);
+
+            int level = rangeBlock->level;
+            float newErrorThreshold = errorThreshold;
+            if (rangeBlock->size == 1) newErrorThreshold = INT_MAX;
+
+            Scalar a;
+            Scalar r;
+            float error = findParamsAndError(rangeBlockVideo, domainBlockVideo, newErrorThreshold, a, r);
+            rangeBlock->a = a;
+            rangeBlock->r = r;
+            rangeBlock->error = error;
+            uncoveredRangeBlocks.push(rangeBlock);
         }
-
-        vector<Mat> domainBlockVideo = findReducedDomainBlock(processedVideo, rangeBlock);
-
+        Block *rangeBlock = uncoveredRangeBlocks.top();
+        uncoveredRangeBlocks.pop();
+        //cout << "error " << rangeBlock->error << " size " << rangeBlock->size << endl;
+        int level = rangeBlock->level;
         float newErrorThreshold = errorThreshold;
-        if (rangeBlock->size== 1) newErrorThreshold = INT_MAX;
-
-        Scalar a;
-        Scalar r;
-        float error = findParamsAndError(rangeBlockVideo, domainBlockVideo, newErrorThreshold, a, r);
-        rangeBlock->a = a;
-        rangeBlock->r = r;
-
-        if (error >= newErrorThreshold && rangeBlock->size != 1) {
+        if (rangeBlock->size == 1) newErrorThreshold = INT_MAX;
+        if (rangeBlock->error >= newErrorThreshold && rangeBlock->size != 1) {
             int maxDepth = (int) log2(startRangeSize / minRangeSize);
-            octTreeDown(rangeBlock, uncoveredRangeBlocks, maxDepth);
+            octTreeDown(rangeBlock, rangeBlocksWithoutComputedError, maxDepth);
+            int change = rangeBlocksWithoutComputedError.size();
+            numberTransformations += change;
         }
     }
+    cout << "actual " << numberTransformations << endl;
     return topRangeBlocks;
 }
 
@@ -373,19 +387,14 @@ vector<Mat> decompress(const vector<Block *> &topRangeBlocks, const int numFrame
             for (int i = 0; i < rangeBlock->children.size(); ++i) {
                 Block *child = rangeBlock->children[i];
                 child->level = rangeBlock->level + 1;
-                if (rangeBlock->level < maxDepth - 1 || rangeBlock->level == maxDepth) {
+                if (rangeBlock->level < maxDepth) {
                     child->size = rangeBlock->size / 2;
                     child->numFrames = numFrames / (pow(2, child->level));
                     child->startX = (i % 2 == 0) ? rangeBlock->startX : rangeBlock->startX + child->size;
                     child->startY = (i == 2 || i == 3 || i == 6 || i == 7) ? rangeBlock->startY + child->size : rangeBlock->startY;
                     child->startFrame = (i < 4) ? rangeBlock->startFrame : rangeBlock->startFrame + child->numFrames;
-                    if (rangeBlock->level != maxDepth) uncheckedRangeBlocks.push(child);
-                    else {
-                        cout << "here" << endl;
-                        rangeBlocks.push_back(child);
-                    }
-
-                } else if (rangeBlock->level == maxDepth -1) {
+                    uncheckedRangeBlocks.push(child);
+                } else {
                     child->size = rangeBlock->size;
                     child->numFrames = 1;
                     child->startX = rangeBlock->startX;
@@ -393,7 +402,6 @@ vector<Mat> decompress(const vector<Block *> &topRangeBlocks, const int numFrame
                     child->startFrame = rangeBlock->startFrame + i;
                     rangeBlocks.push_back(child);
                 }
-
             }
         }
         else {
@@ -438,16 +446,16 @@ vector<Mat> decompress(const vector<Block *> &topRangeBlocks, const int numFrame
     return iterations.back();
 }
 
-vector<Mat> generateVideo(const vector<Mat> &frames, const int &writeSize, long &transformationCount, float &totalTime, const int &errorThreshold=0) {
+vector<Mat> generateVideo(const vector<Mat> &frames, const int &writeSize, long &transformationCount, float &totalTime, const float &minCompressionRatio, const int &errorThreshold=0 ) {
     // PARAMS
     int startBlockSize = 32;
     int minBlockSize = 1;
-    int numberIterations = 3;
+    int numberIterations = 5;
     bool showOutlines = false;
     int blockSize = 32;
     cout << "Compressing block..." << endl;
     chrono::steady_clock::time_point begin = chrono::steady_clock::now();
-    vector<Block *> transformations = compress(frames, startBlockSize, minBlockSize, errorThreshold);
+    vector<Block *> transformations = compress(frames, startBlockSize, minBlockSize, errorThreshold, minCompressionRatio);
     chrono::steady_clock::time_point end = chrono::steady_clock::now();
     totalTime += (float)chrono::duration_cast<chrono::microseconds>(end - begin).count() / 1000000;
     transformationCount += transformations.size();
@@ -468,8 +476,8 @@ int main() {
     // Need to make this work for non-square, power of 2 images.
     int outputSize = 512;
     int writeSize = outputSize;
-    int skipFrames = 256;
-    int maxFrames = 32;
+    int skipFrames = 4567;
+    int maxFrames = 64;
 
     string fileName = "bunny";
     string fileExtension = ".y4m";
@@ -524,14 +532,15 @@ int main() {
         channel2.push_back(channels[2]);
 
 
+
         if (frameCount % 32 == 0) {
             vector<Mat> decompressedChannel0;
             vector<Mat> decompressedChannel1;
             vector<Mat> decompressedChannel2;
             cout << "frames " << frameCount << endl;
-            decompressedChannel0 = generateVideo(channel0, writeSize, transformationCount, totalTime, 30);
-            decompressedChannel1 = generateVideo(channel1, writeSize, transformationCount, totalTime, 30);
-            decompressedChannel2 = generateVideo(channel2, writeSize, transformationCount, totalTime, 30);
+            decompressedChannel0 = generateVideo(channel0, writeSize, transformationCount, totalTime, 2, 75);
+            decompressedChannel1 = generateVideo(channel1, writeSize, transformationCount, totalTime, 1, 300);
+            decompressedChannel2 = generateVideo(channel2, writeSize, transformationCount, totalTime, 1, 300);
             vector<Mat> newVideo;
             for (int i = 0; i < decompressedChannel0.size(); ++i) {
                 vector<Mat> newChannels;
@@ -575,11 +584,13 @@ int main() {
             channel2.clear();
         }
     }
-    cout << "Done." << endl;
+    cout << endl;
+    cout << "============Summary============" << endl;
     cout << "Total encoding time: " << totalTime << endl;
     cout << "Frames encoded per second: " << maxFrames / totalTime << endl;
     cout << "Transformation count: " << transformationCount << endl;
-    cout << "Compression ratio: " << (outputSize * outputSize * maxFrames * 24) / (double) (transformationCount * 9)
+    cout << "Bitrate: " << ((transformationCount * 10) / (maxFrames / 24)) / 8000 << endl;
+    cout << "Compression ratio: " << (outputSize * outputSize * maxFrames * 24) / (double) (transformationCount * 10)
          << endl;
     cout << "SSIM: " <<  totalSSIM/(double) maxFrames  << endl;
     cout << "PSNR: " <<  totalPSNR/(double) maxFrames  << endl;
