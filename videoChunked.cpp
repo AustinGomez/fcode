@@ -450,7 +450,7 @@ vector<Mat> generateVideo(const vector<Mat> &frames, const int &writeSize, long 
     // PARAMS
     int startBlockSize = 32;
     int minBlockSize = 1;
-    int numberIterations = 5;
+    int numberIterations = 3;
     bool showOutlines = false;
     int blockSize = 32;
     cout << "Compressing block..." << endl;
@@ -468,6 +468,7 @@ vector<Mat> generateVideo(const vector<Mat> &frames, const int &writeSize, long 
                                           numberIterations,
                                           showOutlines
                                           );
+    for (auto &block : transformations) delete block;
 
     return decompressed;
 }
@@ -476,8 +477,8 @@ int main() {
     // Need to make this work for non-square, power of 2 images.
     int outputSize = 512;
     int writeSize = outputSize;
-    int skipFrames = 4567;
-    int maxFrames = 64;
+    int skipFrames = 0;
+    int maxFrames = 512;
 
     string fileName = "bunny";
     string fileExtension = ".y4m";
